@@ -91,24 +91,93 @@
     let unsubscribeRoom = null;
     let isGM = false;
     let localChatCount = 0; 
-    let currentReplyTo = null; // Menyimpan data pesan yang direply
+    let currentReplyTo = null;
 
     const ROLES = {
-        spv: { id: 'spv', name: 'Supervisor', icon: '👔', desc: 'Penjaga visi & konteks klien.' },
-        leader: { id: 'leader', name: 'Leader', icon: '📋', desc: 'Penerjemah kebutuhan ke resep teknis.' },
-        baker1: { id: 'baker1', name: 'Baker 1', icon: '⚖️', desc: 'Menakar presisi (Prep).' },
-        baker2: { id: 'baker2', name: 'Baker 2', icon: '🥣', desc: 'Mengatur waktu produksi.' },
-        baker3: { id: 'baker3', name: 'Baker 3', icon: '🎁', desc: 'Finishing sesuai resep.' }
+        spv: { id: 'spv', name: 'Supervisor', icon: '👔', desc: 'Pemegang konteks klien.' },
+        leader: { id: 'leader', name: 'Leader', icon: '📋', desc: 'Penyusun SOP Final.' },
+        baker1: { id: 'baker1', name: 'Baker 1', icon: '⚖️', desc: 'Penakar presisi.' },
+        baker2: { id: 'baker2', name: 'Baker 2', icon: '🥣', desc: 'Metode & Alur Masak.' },
+        baker3: { id: 'baker3', name: 'Baker 3', icon: '🎁', desc: 'Finishing & QC.' }
     };
 
-    const SCENARIO = {
-        publicBrief: "Tim, kita dapat pesanan 1 porsi roti secepatnya. Daftar bahan pokok ada di bawah, Leader tolong atur detail takaran dan alurnya agar sesuai.",
-        scrambledIngredients: ["Tepung Terigu", "Ragi", "Air", "Pemanis (Gula/Stevia)", "Mentega"],
-        secretNeed: "Klien adalah seorang lansia 70 tahun. Gigi sensitif jadi butuh roti bertekstur sangat lembut (Proofing Lama: min. 60 menit). Dia diabetes jadi dilarang pakai gula pasir, harus pakai Stevia. Dia kesulitan merobek plastik keras, harus pakai Box Kertas Lipat.",
-        
-        // Target validasi sukses
-        targetFinishing: { topping: "Keju Parut Lembut", packaging: "Box Kertas Lipat" }
+    // --- GAME OPTIONS ---
+    const OPT = {
+        mix: ["Pilih...", "5 Menit", "10 Menit", "15 Menit", "20 Menit", "30 Menit"],
+        proof: ["Pilih...", "Tanpa Proofing", "Cepat (Suhu Hangat)", "Standar (Suhu Ruang)", "Lambat (Suhu Dingin)", "Double Proofing"],
+        shape: ["Pilih...", "Bulat Standar", "Baguette (Panjang)", "Kepang", "Bentuk Hewan", "Roti Tawar (Loyang)"],
+        cook: ["Pilih...", "Baking (Oven)", "Kukus (Steamer)", "Goreng (Deep Fry)", "Air Fryer", "Microwave"],
+        topping: ["Pilih...", "Tanpa Topping", "Kacang Cincang Kasar", "Keju Parut Lembut", "Cokelat Butir", "Wijen & Oat"],
+        pack: ["Pilih...", "Plastik Ikat Kawat", "Box Kertas Lipat", "Paper Bag Premium", "Plastik Klip", "Mika Plastik"]
     };
+
+    // --- DYNAMIC SCENARIOS (5 Rooms) ---
+    const SCENARIOS = {
+        'room_1': {
+            title: "Kakek Lansia", brief: "Pesan 1 porsi roti manis standar secepatnya.",
+            baseIngredients: [{n: "Tepung Terigu", g: 250}, {n: "Air", g: 150}, {n: "Gula Pasir", g: 20}, {n: "Mentega", g: 30}, {n: "Ragi", g: 5}],
+            secretNeed: "Klien lansia 70 thn, DIABETES (ganti Gula Pasir dengan Stevia/Pemanis Aman), GIGI SENSITIF (wajib Proofing Lambat/Double Proofing agar sangat lembut), TANGAN LEMAH (jangan pakai Plastik Ikat Kawat, pakai Box Kertas).",
+            eval: (leader) => {
+                let err = [];
+                let ingStr = leader.ingredients.map(i => i.n.toLowerCase()).join(" ");
+                if (ingStr.includes('gula pasir')) err.push("Klien diabetes tapi Anda tetap meresepkan Gula Pasir.");
+                if (!leader.b2.proof.includes("Lambat") && !leader.b2.proof.includes("Double")) err.push("Proofing kurang lama, tekstur roti akan terlalu keras untuk lansia.");
+                if (leader.b3.pack.includes("Kawat") || leader.b3.pack.includes("Klip")) err.push("Kakek kesulitan membuka kemasan plastik yang diikat keras.");
+                return err;
+            }
+        },
+        'room_2': {
+            title: "Pesta Anak Beralergi", brief: "Pesan 1 porsi roti lucu untuk ultah anak 5 tahun.",
+            baseIngredients: [{n: "Tepung Terigu", g: 250}, {n: "Susu Cair", g: 150}, {n: "Gula Pasir", g: 30}, {n: "Mentega", g: 30}, {n: "Ragi", g: 5}],
+            secretNeed: "Anak 5 thn suka bentuk lucu (Wajib Bentuk Hewan). HATI-HATI: Anak ini alergi kacang parah! Dilarang keras menggunakan topping kacang.",
+            eval: (leader) => {
+                let err = [];
+                if (!leader.b2.shape.includes("Hewan")) err.push("Bentuk roti kaku dan tidak menarik untuk pesta anak-anak.");
+                if (leader.b3.topping.includes("Kacang")) err.push("FATAL: Anda meresepkan topping kacang yang memicu alergi anak! Klien sangat marah.");
+                return err;
+            }
+        },
+        'room_3': {
+            title: "Atlet Binaraga Diet", brief: "Pesan 1 porsi roti untuk camilan sehabis gym.",
+            baseIngredients: [{n: "Tepung Terigu", g: 250}, {n: "Air", g: 150}, {n: "Gula Pasir", g: 30}, {n: "Mentega", g: 30}, {n: "Ragi", g: 5}],
+            secretNeed: "Klien atlet diet ketat. Anti gula pasir (harus diganti Stevia/hilangkan), sangat menghindari Terigu biasa (ganti dengan Gandum Utuh), dan dilarang dimasak dengan metode Goreng.",
+            eval: (leader) => {
+                let err = [];
+                let ingStr = leader.ingredients.map(i => i.n.toLowerCase()).join(" ");
+                if (ingStr.includes('gula pasir')) err.push("Atlet sedang diet ketat tapi diberi Gula Pasir.");
+                if (ingStr.includes('terigu')) err.push("Atlet mengharapkan karbo kompleks (Gandum), bukan Terigu standar.");
+                if (leader.b2.cook.includes("Goreng")) err.push("Roti digoreng penuh minyak, merusak diet klien.");
+                return err;
+            }
+        },
+        'room_4': {
+            title: "Meeting VIP Eropa", brief: "Pesan 1 porsi roti untuk suguhan meeting direksi.",
+            baseIngredients: [{n: "Tepung Terigu", g: 250}, {n: "Air", g: 150}, {n: "Gula Pasir", g: 10}, {n: "Mentega", g: 20}, {n: "Ragi", g: 5}],
+            secretNeed: "Klien ekspatriat Eropa. Mereka menyukai roti otentik bergaya artisan (Bentuk Baguette), dengan penyajian yang premium dan elegan (Paper Bag Premium).",
+            eval: (leader) => {
+                let err = [];
+                if (!leader.b2.shape.includes("Baguette")) err.push("Bentuk roti tidak sesuai ekspektasi jamuan artisan gaya Eropa.");
+                if (!leader.b3.pack.includes("Premium")) err.push("Kemasan terlihat murahan untuk level meeting VIP Direksi.");
+                return err;
+            }
+        },
+        'room_5': {
+            title: "Pelanggan Vegan", brief: "Pesan 1 porsi roti untuk acara kumpul komunitas.",
+            baseIngredients: [{n: "Tepung Terigu", g: 250}, {n: "Susu Sapi", g: 150}, {n: "Gula Pasir", g: 20}, {n: "Mentega Sapi", g: 30}, {n: "Ragi", g: 5}],
+            secretNeed: "Pelanggan adalah komunitas VEGAN KETAT. Haram menggunakan unsur hewani. Susu Sapi harus diganti (Air/Susu Nabati), Mentega Sapi harus diganti (Margarin/Minyak).",
+            eval: (leader) => {
+                let err = [];
+                let ingStr = leader.ingredients.map(i => i.n.toLowerCase()).join(" ");
+                if (ingStr.includes('susu sapi') || ingStr.includes('mentega sapi')) err.push("FATAL: Anda tetap menggunakan produk hewani untuk klien Vegan ketat!");
+                return err;
+            }
+        }
+    };
+
+    function getScenario() {
+        const id = currentRoomId || 'room_1';
+        return SCENARIOS[id] || SCENARIOS['room_1'];
+    }
 
     const showModal = (title, msg) => {
         document.getElementById('modalTitle').innerText = title;
@@ -118,7 +187,7 @@
     window.closeModal = () => document.getElementById('modalOverlay').classList.add('hidden');
     const getEl = (id) => document.getElementById(id);
 
-    // Audio Setup (Tone.js)
+    // Audio Setup
     let synth, synthReceive;
     async function initAudio() {
         if (!synth) {
@@ -173,11 +242,11 @@
                 players: { spv: null, leader: null, baker1: null, baker2: null, baker3: null },
                 chat: [],
                 gameState: { 
-                    spvFirstMessageSent: false, // Membuka chat Leader
-                    leaderSopSent: false, // Membuka chat Bakers & Mengunci SPV
-                    spvMentioned: false, // Membuka kunci darurat SPV
-                    leaderInstructions: { b1: "", b2: "", b3: "" }, 
-                    baker1Done: false, baker2Done: false, baker3Done: false, resultMsg: "" 
+                    spvFirstMessageSent: false,
+                    leaderSopSent: false, 
+                    spvMentioned: false, 
+                    leaderRecipe: null, 
+                    baker1Done: false, baker2Done: false, baker3Done: false, resultMsg: "", evalErrors: [] 
                 }
             });
         }
@@ -214,23 +283,22 @@
     window.startGame = async () => {
         if (!roomData.players.spv || !roomData.players.leader) return showModal("Tunggu", "SPV dan Leader wajib hadir.");
         await updateDoc(getRoomRef(currentRoomId), { status: 'playing' });
-        sendSystemChat("▶️ SIMULASI DIMULAI! Supervisor, silakan berikan arahan awal kepada Leader.");
+        sendSystemChat("▶️ SIMULASI DIMULAI! Supervisor, silakan berikan arahan awal kepada Leader melalui chat.");
     };
 
     function checkChatAccess() {
         if (isGM) return { allowed: true, reason: "" };
         const gs = roomData.gameState;
-        
         if (currentRole === 'spv') {
-            if (gs.leaderSopSent && !gs.spvMentioned) return { allowed: false, reason: "Terkunci: Anda tidak boleh mengintervensi produksi kecuali dimention (@) oleh Leader." };
+            if (gs.leaderSopSent && !gs.spvMentioned) return { allowed: false, reason: "Terkunci: Dilarang intervensi dapur kecuali dimention (@) Leader." };
             return { allowed: true, reason: "" };
         }
         if (currentRole === 'leader') {
-            if (!gs.spvFirstMessageSent) return { allowed: false, reason: "Terkunci: Tunggu instruksi pertama dari Supervisor." };
+            if (!gs.spvFirstMessageSent) return { allowed: false, reason: "Terkunci: Tunggu instruksi SPV." };
             return { allowed: true, reason: "" };
         }
         if (currentRole.startsWith('baker')) {
-            if (!gs.leaderSopSent) return { allowed: false, reason: "Terkunci: Menunggu Leader mengirimkan SOP Produksi." };
+            if (!gs.leaderSopSent) return { allowed: false, reason: "Terkunci: Menunggu Leader menetapkan SOP Dapur." };
             return { allowed: true, reason: "" };
         }
         return { allowed: false, reason: "Peran tidak valid" };
@@ -238,8 +306,7 @@
 
     window.setReply = (id, sender, text) => {
         currentReplyTo = { id, sender, text: text.length > 30 ? text.substring(0,30) + '...' : text };
-        updateUI();
-        setTimeout(() => getEl('chatInput').focus(), 100);
+        updateUI(); setTimeout(() => getEl('chatInput').focus(), 100);
     };
     window.cancelReply = () => { currentReplyTo = null; updateUI(); };
 
@@ -253,18 +320,14 @@
         if(!access.allowed) return showModal("Akses Ditolak", access.reason);
 
         const senderName = isGM ? "Game Master" : ROLES[currentRole].name;
-        const chatId = 'msg_' + Date.now();
-        const chatObj = { id: chatId, sender: senderName, roleId: currentRole, text: text, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) };
+        const chatObj = { id: 'msg_'+Date.now(), sender: senderName, roleId: currentRole, text: text, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) };
         if (currentReplyTo) chatObj.replyTo = currentReplyTo;
 
         const updates = { chat: arrayUnion(chatObj) };
         const gs = roomData.gameState;
 
-        // Smart Mention Logic & Locks
         if (currentRole === 'spv' && !gs.spvFirstMessageSent) updates['gameState.spvFirstMessageSent'] = true;
-        if (currentRole === 'spv' && gs.spvMentioned) updates['gameState.spvMentioned'] = false; // Reset mention flag after reply
-        
-        // If Leader mentions SPV (either by typing @SPV or replying to SPV)
+        if (currentRole === 'spv' && gs.spvMentioned) updates['gameState.spvMentioned'] = false; 
         if (currentRole === 'leader' && gs.leaderSopSent) {
             const mentionsSPV = text.toLowerCase().includes('@spv') || text.toLowerCase().includes('@supervisor') || (currentReplyTo && currentReplyTo.roleId === 'spv');
             if (mentionsSPV) updates['gameState.spvMentioned'] = true;
@@ -279,46 +342,82 @@
         await updateDoc(getRoomRef(currentRoomId), { chat: arrayUnion({ id: 'sys_'+Date.now(), sender: "Sistem", roleId: "system", text: message, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }) });
     }
 
+    // --- LOGIC SUBMISSIONS ---
     window.leaderSubmit = async () => {
-        const b1 = getEl('inst_b1').value, b2 = getEl('inst_b2').value, b3 = getEl('inst_b3').value;
-        if(!b1 || !b2 || !b3) return showModal("Peringatan", "Lengkapi seluruh Pola Takaran dan SOP untuk para Baker.");
+        let ingredients = [];
+        for(let i=0; i<5; i++) {
+            let n = getEl(`ldr_ing_name_${i}`).value.trim();
+            let g = parseInt(getEl(`ldr_ing_gram_${i}`).value) || 0;
+            if(n && g>0) ingredients.push({n, g});
+        }
+        if(ingredients.length === 0) return showModal("Peringatan", "Bahan baku minimal 1 harus diisi beserta gramasinya.");
+
+        let b2 = {
+            mix: getEl('ldr_b2_mix').value, proof: getEl('ldr_b2_proof').value,
+            shape: getEl('ldr_b2_shape').value, cook: getEl('ldr_b2_cook').value
+        };
+        if(Object.values(b2).includes("Pilih...")) return showModal("Peringatan", "Lengkapi seluruh metode Baker 2.");
+
+        let b3 = { topping: getEl('ldr_b3_topping').value, pack: getEl('ldr_b3_pack').value };
+        if(Object.values(b3).includes("Pilih...")) return showModal("Peringatan", "Lengkapi metode Baker 3.");
         
         await updateDoc(getRoomRef(currentRoomId), { 
-            'gameState.leaderInstructions': { b1, b2, b3 },
+            'gameState.leaderRecipe': { ingredients, b2, b3 },
             'gameState.leaderSopSent': true 
         });
         sendSystemChat("📋 Leader telah mendistribusikan SOP ke Dapur! Channel komunikasi antar Baker kini TERBUKA.");
     };
     
     window.baker1Submit = async () => {
-        const ragi = getEl('input_Ragi').value; const air = getEl('input_Air').value; const pemanis = getEl('input_Pemanis').value;
-        if(!ragi || !air || !pemanis) return showModal("Peringatan", "Baker 1: Masukkan semua angka takaran sesuai instruksi Leader!");
-        
+        const leaderIng = roomData.gameState.leaderRecipe.ingredients;
+        for(let i=0; i<leaderIng.length; i++) {
+            let val = parseInt(getEl(`bk1_gram_${i}`).value) || 0;
+            if(val !== leaderIng[i].g) return showModal("Timbangan Gagal!", `Gramasi untuk bahan nomor ${i+1} tidak presisi! Harap cocokkan dengan resep dari Leader di Live Chat.`);
+        }
         await updateDoc(getRoomRef(currentRoomId), { 'gameState.baker1Done': true }); 
-        sendSystemChat("⚖️ Baker 1 selesai menakar bahan baku. Adonan diserahkan ke Baker 2."); 
+        sendSystemChat("⚖️ Baker 1 selesai menakar bahan baku dengan PRESISI TEPAT. Adonan diserahkan ke Baker 2."); 
     };
 
     window.baker2Submit = async () => { 
-        const t1 = getEl('time_1').value; const t2 = getEl('time_2').value;
-        if(!t1 || !t2) return showModal("Peringatan", "Baker 2: Masukkan estimasi waktu produksi (menit) sesuai resep Leader!");
-
+        const lb2 = roomData.gameState.leaderRecipe.b2;
+        if(getEl('bk2_mix').value !== lb2.mix || getEl('bk2_proof').value !== lb2.proof || 
+           getEl('bk2_shape').value !== lb2.shape || getEl('bk2_cook').value !== lb2.cook) {
+            return showModal("Kesalahan Proses!", "Pilihan metode produksi Anda tidak sesuai dengan instruksi Leader. Tanyakan di Live Chat jika ragu!");
+        }
         await updateDoc(getRoomRef(currentRoomId), { 'gameState.baker2Done': true }); 
-        sendSystemChat("🥣 Baker 2 selesai mengolah. Adonan masuk oven dan diserahkan ke Baker 3."); 
+        sendSystemChat("🥣 Baker 2 selesai mengolah. Roti matang diserahkan ke Baker 3."); 
     };
     
     window.baker3Submit = async () => {
-        const topping = getEl('sel_topping').value, packaging = getEl('sel_packaging').value;
-        let isSuccess = topping === SCENARIO.targetFinishing.topping && packaging === SCENARIO.targetFinishing.packaging;
-        
-        let resultMsg = isSuccess ? "🎉 LUAR BIASA! Roti sesuai dengan kondisi fisik dan pantangan kakek lansia." : "❌ GAGAL! Klien komplain. Roti atau kemasan tidak sesuai dengan kondisinya.";
-        let feedback = isSuccess ? "EVALUASI: Tim berhasil! Leader tidak sekadar menyuruh Baker bekerja, tapi menggali 'Siapa Klien Kita' dari SPV." : 
-                       "EVALUASI: Gagal Berempati. Tim hanya fokus bekerja bak mesin tanpa menggali konteks. Lansia kesulitan dengan kemasan keras / topping yang melukai giginya.";
+        if(!getEl('qc_1').checked || !getEl('qc_2').checked || !getEl('qc_3').checked) {
+            return showModal("QC Gagal", "Anda wajib melakukan checklist Quality Control (QC) sebelum produk dikirim!");
+        }
 
-        await updateDoc(getRoomRef(currentRoomId), { 'gameState.baker3Done': true, 'gameState.resultMsg': resultMsg, 'status': 'finished' });
-        await sendSystemChat("🏁 PRODUKSI SELESAI! Hasil: " + resultMsg);
-        setTimeout(() => sendSystemChat("💡 " + feedback), 1500);
+        const lb3 = roomData.gameState.leaderRecipe.b3;
+        if(getEl('bk3_topping').value !== lb3.topping || getEl('bk3_pack').value !== lb3.pack) {
+            return showModal("Kesalahan Finishing!", "Pilihan Topping atau Kemasan tidak sesuai dengan SOP Leader!");
+        }
+
+        // EVALUATION LOGIC
+        const scenario = getScenario();
+        const errors = scenario.eval(roomData.gameState.leaderRecipe);
+        const isSuccess = errors.length === 0;
+
+        let resultMsg = isSuccess ? "🎉 LUAR BIASA! Roti diterima dengan sangat bahagia oleh pelanggan." : "❌ GAGAL! Klien melayangkan Komplain Keras.";
+        
+        await updateDoc(getRoomRef(currentRoomId), { 
+            'gameState.baker3Done': true, 
+            'gameState.resultMsg': resultMsg, 
+            'gameState.evalErrors': errors,
+            'status': 'finished' 
+        });
+        
+        await sendSystemChat("🏁 PRODUKSI SELESAI & DISERAHKAN! Hasil: " + resultMsg);
     };
 
+    // ==========================================
+    // UI RENDERERS
+    // ==========================================
     function updateUI() {
         const appDiv = getEl('app');
         if (!currentRoomId) appDiv.innerHTML = renderLobbyHTML();
@@ -326,7 +425,6 @@
         else {
             if (roomData.status === 'finished') appDiv.innerHTML = renderResultHTML();
             else appDiv.innerHTML = renderGameAreaHTML();
-            
             const chatBox = getEl('chatHistoryBox');
             if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
         }
@@ -370,14 +468,10 @@
         </div>`;
     }
 
-    function formatText(text) {
-        // Highlight Mentions
-        return text.replace(/@(Supervisor|Leader|Baker 1|Baker 2|Baker 3|SPV)/gi, match => `<span class="mention">${match}</span>`);
-    }
+    function formatText(text) { return text.replace(/@(Supervisor|Leader|Baker 1|Baker 2|Baker 3|SPV)/gi, match => `<span class="mention">${match}</span>`); }
 
     function renderGameAreaHTML() {
         const access = checkChatAccess();
-        
         let chatInputSection = `
             ${currentReplyTo ? `<div class="bg-amber-50 text-xs p-2 flex justify-between items-center border-t">
                 <span class="text-slate-600">Membalas <strong>${currentReplyTo.sender}</strong>: <span class="italic text-slate-500">"${currentReplyTo.text}"</span></span>
@@ -389,23 +483,24 @@
             </form>`;
 
         if (isGM) {
-            return `
-            <div class="h-full flex flex-col md:flex-row gap-2 md:gap-4 fade-in">
-                <div class="w-full md:w-1/3 flex flex-col bg-slate-900 rounded-xl md:rounded-2xl shadow-md border-2 border-slate-800 h-[45%] md:h-full shrink-0">
+            return `<div class="h-full flex flex-col md:flex-row gap-2 md:gap-4 fade-in">
+                <div class="w-full md:w-1/3 flex flex-col bg-slate-900 rounded-xl shadow-md border-2 border-slate-800 h-[45%] md:h-full shrink-0">
                     <div class="bg-slate-800 text-white p-2 md:p-3 border-b font-bold flex justify-between items-center text-sm">
-                        <span>👑 GM Monitor</span>
-                        <button onclick="window.gmLeaveRoom()" class="text-[10px] bg-red-500 hover:bg-red-600 px-2 py-1 rounded">⬅ Kembali</button>
+                        <span>👑 GM Monitor</span><button onclick="window.gmLeaveRoom()" class="text-[10px] bg-red-500 hover:bg-red-600 px-2 py-1 rounded">⬅ Kembali</button>
                     </div>
                     <div id="chatHistoryBox" class="flex-1 p-3 overflow-y-auto chat-container bg-slate-50 flex flex-col gap-2">${renderChatMessages()}</div>
                     ${chatInputSection}
                 </div>
-                <div class="w-full md:w-2/3 flex-1 flex flex-col gap-4 overflow-y-auto chat-container pb-6 md:pb-0">
-                    <div class="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
-                        <h2 class="text-lg md:text-xl font-bold text-slate-800 mb-4 border-b pb-2">Status Room: ${currentRoomId}</h2>
-                        <ul class="text-sm space-y-2 mb-4">
-                            <li><strong>SOP Dapur Terkirim:</strong> ${roomData.gameState.leaderSopSent ? '✅ Ya' : '❌ Belum'}</li>
-                            <li><strong>SPV Dimention/Bisa Chat:</strong> ${roomData.gameState.spvMentioned ? '✅ Ya (Darurat Buka)' : (roomData.gameState.leaderSopSent ? '❌ Terkunci' : '✅ Ya (Normal)')}</li>
-                        </ul>
+                <div class="w-full md:w-2/3 flex-1 overflow-y-auto bg-white p-4 rounded-xl shadow-sm border border-slate-200 text-sm">
+                    <h2 class="text-lg font-bold border-b pb-2 mb-2">Status Room: ${currentRoomId}</h2>
+                    <ul class="space-y-1">
+                        <li>Leader SOP Sent: ${roomData.gameState.leaderSopSent ? '✅' : '❌'}</li>
+                        <li>Baker 1 Done: ${roomData.gameState.baker1Done ? '✅' : '❌'}</li>
+                        <li>Baker 2 Done: ${roomData.gameState.baker2Done ? '✅' : '❌'}</li>
+                        <li>Baker 3 Done: ${roomData.gameState.baker3Done ? '✅' : '❌'}</li>
+                    </ul>
+                    <div class="mt-4 p-3 bg-red-50 border border-red-200 rounded">
+                        <strong>Rahasia Klien:</strong> ${getScenario().secretNeed}
                     </div>
                 </div>
             </div>`;
@@ -420,48 +515,33 @@
                 <div id="chatHistoryBox" class="flex-1 p-3 overflow-y-auto chat-container bg-white flex flex-col gap-2">${renderChatMessages()}</div>
                 ${chatInputSection}
             </div>
-            <div class="w-full md:w-2/3 flex-1 flex flex-col gap-4 overflow-y-auto chat-container pb-6 md:pb-0">
+            <div class="w-full md:w-2/3 flex-1 flex flex-col overflow-y-auto chat-container pb-6 md:pb-0">
                 ${renderRoleSpecificPanel()}
             </div>
         </div>`;
     }
 
     function renderChatMessages() {
-        if (!roomData.chat || roomData.chat.length === 0) return `<div class="text-center text-slate-400 text-xs my-auto">Ruang obrolan kosong.<br>Supervisor, silakan mulai percakapan.</div>`;
-        
+        if (!roomData.chat || roomData.chat.length === 0) return `<div class="text-center text-slate-400 text-xs my-auto">Ruang obrolan kosong.</div>`;
         return roomData.chat.map(msg => {
-            const isMe = msg.roleId === currentRole;
-            const isSystem = msg.roleId === 'system';
-            const isGMMessage = msg.roleId === 'gm';
-            
-            if (isSystem) return `<div class="text-center text-[10px] md:text-xs font-bold text-amber-800 bg-amber-100 rounded-lg py-1 px-2 mx-auto my-1 border border-amber-200 w-[95%] shadow-sm">${msg.text}</div>`;
-
-            let replyHtml = '';
-            if (msg.replyTo) {
-                replyHtml = `<div class="reply-box text-slate-500 mb-1"><strong>${msg.replyTo.sender}</strong>: ${msg.replyTo.text}</div>`;
-            }
-
-            const formattedText = formatText(msg.text);
-
-            if (isGMMessage) {
+            const isMe = msg.roleId === currentRole; const isSys = msg.roleId === 'system'; const isGM = msg.roleId === 'gm';
+            if (isSys) return `<div class="text-center text-[10px] font-bold text-amber-800 bg-amber-100 rounded-lg py-1 px-2 mx-auto my-1 border border-amber-200 w-[95%]">${msg.text}</div>`;
+            let replyHtml = msg.replyTo ? `<div class="reply-box text-slate-500 mb-1"><strong>${msg.replyTo.sender}</strong>: ${msg.replyTo.text}</div>` : '';
+            const txt = formatText(msg.text);
+            if (isGM) {
                 return `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[85%] ${isMe ? 'ml-auto' : 'mr-auto'} my-1 group">
-                    <span class="text-[9px] md:text-[10px] text-slate-400 mb-1 mx-1 font-bold">👑 ${msg.sender} • ${msg.time}</span>
-                    <div class="p-2 md:p-3 rounded-2xl text-xs md:text-sm shadow-md bg-slate-800 text-white border border-slate-900 ${isMe ? 'rounded-tr-none' : 'rounded-tl-none'} relative">
-                        ${replyHtml}${formattedText}
-                        ${!isMe ? `<button onclick="window.setReply('${msg.id}', '${msg.sender}', '${msg.text.replace(/'/g, "\\'")}')" class="absolute -right-6 top-2 opacity-0 group-hover:opacity-100 text-slate-400 hover:text-amber-500 transition-opacity" title="Balas">↩</button>` : ''}
-                    </div>
-                </div>`;
+                    <span class="text-[9px] text-slate-400 mb-1 mx-1 font-bold">👑 ${msg.sender}</span>
+                    <div class="p-2 rounded-2xl text-xs shadow-md bg-slate-800 text-white relative">
+                        ${replyHtml}${txt}
+                        ${!isMe ? `<button onclick="window.setReply('${msg.id}', '${msg.sender}', '${msg.text.replace(/'/g, "\\'")}')" class="absolute -right-6 top-2 opacity-0 group-hover:opacity-100 text-slate-400">↩</button>` : ''}
+                    </div></div>`;
             }
-
-            return `
-                <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[85%] ${isMe ? 'ml-auto' : 'mr-auto'} my-1 group">
-                    <span class="text-[9px] md:text-[10px] text-slate-400 mb-1 mx-1">${msg.sender} • ${msg.time}</span>
-                    <div class="p-2 md:p-3 rounded-2xl text-xs md:text-sm shadow-sm ${isMe ? 'bg-amber-100 text-amber-900 rounded-tr-none border border-amber-200' : 'bg-slate-100 text-slate-800 rounded-tl-none border border-slate-200'} relative">
-                        ${replyHtml}${formattedText}
-                        ${!isMe ? `<button onclick="window.setReply('${msg.id}', '${msg.sender}', '${msg.text.replace(/'/g, "\\'")}')" class="absolute ${isMe ? '-left-6' : '-right-6'} top-2 opacity-0 group-hover:opacity-100 text-slate-400 hover:text-amber-500 transition-opacity" title="Balas">↩</button>` : ''}
-                    </div>
-                </div>
-            `;
+            return `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[85%] ${isMe ? 'ml-auto' : 'mr-auto'} my-1 group">
+                <span class="text-[9px] text-slate-400 mb-1 mx-1">${msg.sender}</span>
+                <div class="p-2 rounded-2xl text-xs shadow-sm ${isMe ? 'bg-amber-100 text-amber-900 rounded-tr-none' : 'bg-slate-100 text-slate-800 rounded-tl-none'} relative">
+                    ${replyHtml}${txt}
+                    ${!isMe ? `<button onclick="window.setReply('${msg.id}', '${msg.sender}', '${msg.text.replace(/'/g, "\\'")}')" class="absolute ${isMe ? '-left-6' : '-right-6'} top-2 opacity-0 group-hover:opacity-100 text-slate-400">↩</button>` : ''}
+                </div></div>`;
         }).join('');
     }
 
@@ -469,82 +549,94 @@
         switch(currentRole) {
             case 'spv': return renderSPVPanel(); case 'leader': return renderLeaderPanel();
             case 'baker1': return renderBaker1Panel(); case 'baker2': return renderBaker2Panel();
-            case 'baker3': return renderBaker3Panel(); default: return `<div>-</div>`;
+            case 'baker3': return renderBaker3Panel(); default: return ``;
         }
     }
 
+    function generateOptions(arr) { return arr.map(a => `<option value="${a}">${a}</option>`).join(''); }
+
     function renderSPVPanel() {
-        return `<div class="bg-white p-4 md:p-6 rounded-xl md:rounded-2xl shadow-sm border border-slate-200">
-            <h2 class="text-lg font-bold text-slate-800 mb-3">👔 Misi Supervisor</h2>
+        const scenario = getScenario();
+        return `<div class="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-200">
+            <h2 class="text-lg font-bold text-slate-800 mb-3">👔 Instruksi Supervisor</h2>
             <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3 rounded-r text-sm">
-                <h3 class="font-bold text-blue-800 mb-1">Pesanan Awal Klien:</h3><p>${SCENARIO.publicBrief}</p>
+                <h3 class="font-bold text-blue-800 mb-1">Konteks Awal:</h3><p>${scenario.brief}</p>
             </div>
-            <div class="bg-red-50 border border-red-200 p-3 rounded-xl mb-3 relative overflow-hidden shadow-inner">
+            <div class="bg-red-50 border border-red-200 p-3 rounded-xl mb-3 relative shadow-inner">
                 <div class="absolute top-0 right-0 bg-red-600 text-white text-[9px] font-bold px-2 py-1 rounded-bl-lg">RAHASIA</div>
                 <h3 class="font-bold text-red-800 mb-1 text-sm">🕵️ Profil Asli Klien</h3>
-                <p class="text-xs font-semibold bg-white p-2 rounded border border-red-100 mt-2">${SCENARIO.secretNeed}</p>
+                <p class="text-xs font-semibold bg-white p-2 rounded border border-red-100 mt-2">${scenario.secretNeed}</p>
             </div>
             <div class="mb-2">
-                <h3 class="font-bold text-slate-700 mb-1 text-xs">Bahan Baku Mentah (Berikan ke Leader):</h3>
-                <p class="text-[10px] text-slate-500 mb-2 italic">Instruksi: Tugas Anda HANYA menjabarkan nama-nama bahan baku ini. Biarkan Leader yang berpikir menentukan takaran dan kondisinya berdasarkan profil klien.</p>
-                <div class="flex flex-wrap gap-1">
-                    ${SCENARIO.scrambledIngredients.map(i => `<span class="bg-slate-100 px-2 py-1 rounded text-xs border border-slate-300">${i}</span>`).join('')}
+                <h3 class="font-bold text-slate-700 mb-1 text-xs">Instruksikan 5 Bahan Baku Dasar ini ke Leader via Live Chat:</h3>
+                <p class="text-[10px] text-slate-500 mb-2">Tugas Anda HANYA menjabarkan nama-nama bahan baku standar ini. Biarkan Leader yang berpikir menentukan takaran final/penggantinya berdasarkan profil klien.</p>
+                <div class="space-y-1">
+                    ${scenario.baseIngredients.map(i => `<div class="bg-slate-100 px-3 py-1.5 rounded flex justify-between text-xs border font-medium"><span>${i.n}</span><span>${i.g} g</span></div>`).join('')}
                 </div>
             </div>
         </div>`;
     }
 
     function renderLeaderPanel() {
-        const isSent = roomData.gameState.leaderSopSent;
-        if(isSent) return doneScreen('SOP Terkirim ke Dapur. Pantau Produksi.');
+        if(roomData.gameState.leaderSopSent) return doneScreen('SOP Terkirim ke Dapur. Pantau Produksi.');
+        const scenario = getScenario();
         
-        return `<div class="bg-white p-4 md:p-6 rounded-xl md:rounded-2xl shadow-sm border border-slate-200">
-            <h2 class="text-lg font-bold text-amber-600 mb-2">📋 Penentuan Pola Takaran & SOP</h2>
-            <p class="text-[10px] md:text-xs text-slate-600 mb-3 bg-amber-50 p-2 rounded border border-amber-200">Instruksi: Setelah mendapat daftar bahan dari SPV, Anda yang menentukan <strong>Pola Takaran (Kadar manis, air)</strong> dan <strong>Kondisi Adonan</strong> berdasarkan kebutuhan Klien. Isi form ini untuk tim Baker.</p>
+        return `<div class="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-200">
+            <h2 class="text-lg font-bold text-amber-600 mb-2">📋 Penentuan Resep & SOP</h2>
+            <p class="text-[10px] md:text-xs text-slate-600 mb-4 bg-amber-50 p-2 rounded border border-amber-200">Berdasarkan chat dengan SPV, tentukan bahan pengganti (jika perlu) dan metode produksi yang tepat untuk Baker. Pastikan Anda beritahukan pilihan Anda di Live Chat agar Baker bisa menyamakan pilihan mereka dengan SOP ini.</p>
             <div class="space-y-4">
-                <div class="bg-blue-50 p-3 rounded-xl border border-blue-200">
-                    <label class="text-xs font-bold text-blue-900 mb-1 block">Untuk B1 (Penakar Bahan Baku)</label>
-                    <textarea id="inst_b1" rows="2" placeholder="Cth: Ragi 10g, Air 200ml, Pemanis (Gula/Stevia?) berapa gram..." class="w-full px-3 py-2 text-xs border rounded focus:outline-none focus:border-blue-500 resize-none"></textarea>
+                
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <h3 class="text-xs font-bold text-slate-800 mb-2 border-b pb-1">1. Takaran Baker 1 (Sesuaikan Nama Bahan & Gram)</h3>
+                    ${scenario.baseIngredients.map((i, idx) => `
+                        <div class="flex gap-2 mb-2">
+                            <input type="text" id="ldr_ing_name_${idx}" value="${i.n}" class="flex-1 px-2 py-1 text-xs border rounded outline-none focus:border-amber-500 font-medium text-slate-700">
+                            <input type="number" id="ldr_ing_gram_${idx}" value="${i.g}" class="w-16 px-2 py-1 text-xs border rounded outline-none focus:border-amber-500 text-center font-bold">
+                            <span class="text-xs py-1 text-slate-400">g</span>
+                        </div>
+                    `).join('')}
                 </div>
+
                 <div class="bg-indigo-50 p-3 rounded-xl border border-indigo-200">
-                    <label class="text-xs font-bold text-indigo-900 mb-1 block">Untuk B2 (Alur & Waktu Produksi)</label>
-                    <textarea id="inst_b2" rows="2" placeholder="Cth: Mixing 10 mnt, Proofing Lembut/Biasa? berapa menit..." class="w-full px-3 py-2 text-xs border rounded focus:outline-none focus:border-indigo-500 resize-none"></textarea>
+                    <h3 class="text-xs font-bold text-indigo-900 mb-2 border-b border-indigo-200 pb-1">2. Alur Produksi Baker 2</h3>
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div><label class="block text-[10px] text-slate-500 mb-0.5 font-bold">Waktu Mixing</label><select id="ldr_b2_mix" class="w-full p-1 border rounded">${generateOptions(OPT.mix)}</select></div>
+                        <div><label class="block text-[10px] text-slate-500 mb-0.5 font-bold">Metode Proofing</label><select id="ldr_b2_proof" class="w-full p-1 border rounded">${generateOptions(OPT.proof)}</select></div>
+                        <div><label class="block text-[10px] text-slate-500 mb-0.5 font-bold">Bentuk Adonan</label><select id="ldr_b2_shape" class="w-full p-1 border rounded">${generateOptions(OPT.shape)}</select></div>
+                        <div><label class="block text-[10px] text-slate-500 mb-0.5 font-bold">Cara Masak</label><select id="ldr_b2_cook" class="w-full p-1 border rounded">${generateOptions(OPT.cook)}</select></div>
+                    </div>
                 </div>
-                <div class="bg-amber-100 p-3 rounded-xl border border-amber-300">
-                    <label class="text-xs font-bold text-amber-900 mb-1 block">Untuk B3 (Finishing Akhir)</label>
-                    <textarea id="inst_b3" rows="2" placeholder="Tulis instruksi Topping & Jenis Kemasan berdasarkan kondisi Klien..." class="w-full px-3 py-2 text-xs border rounded focus:outline-none focus:border-amber-500 resize-none"></textarea>
+
+                <div class="bg-green-50 p-3 rounded-xl border border-green-200">
+                    <h3 class="text-xs font-bold text-green-900 mb-2 border-b border-green-200 pb-1">3. Finishing Baker 3</h3>
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div><label class="block text-[10px] text-slate-500 mb-0.5 font-bold">Pilihan Topping</label><select id="ldr_b3_topping" class="w-full p-1 border rounded">${generateOptions(OPT.topping)}</select></div>
+                        <div><label class="block text-[10px] text-slate-500 mb-0.5 font-bold">Pilihan Kemasan</label><select id="ldr_b3_pack" class="w-full p-1 border rounded">${generateOptions(OPT.pack)}</select></div>
+                    </div>
                 </div>
-                <button onclick="window.leaderSubmit()" class="w-full bg-slate-800 text-white font-bold py-3 rounded-xl text-sm shadow-md">Kirim Resep ke Baker</button>
+
+                <button onclick="window.leaderSubmit()" class="w-full bg-slate-800 text-white font-bold py-3 rounded-xl text-sm shadow-md transition hover:-translate-y-1">Kunci Resep & Kirim ke Dapur</button>
             </div>
         </div>`;
     }
 
     function renderBaker1Panel() {
-        if (!roomData.gameState.leaderSopSent) return waitLeaderScreen('Menunggu Resep & Takaran...');
+        if (!roomData.gameState.leaderSopSent) return waitLeaderScreen('Menunggu Resep Final Leader...');
         if (roomData.gameState.baker1Done) return doneScreen('Tugas Preparasi Selesai.');
+        const recipe = roomData.gameState.leaderRecipe.ingredients;
 
-        return `<div class="bg-white p-4 md:p-6 rounded-xl md:rounded-2xl shadow-sm border border-slate-200">
-            <h2 class="text-lg font-bold text-slate-800 mb-2">⚖️ Baker 1: Penakar Bahan Baku</h2>
-            <p class="text-xs mb-3 text-slate-600">Tugas: Baca instruksi Leader dari Panel Chat, lalu ketikkan angka timbangan secara manual untuk divalidasi mesin.</p>
-            <div class="bg-amber-50 p-3 rounded-lg border border-amber-200 mb-4">
-                <span class="text-[10px] text-amber-800 font-bold block mb-1">Catatan Sistem Leader:</span>
-                <p class="text-xs font-medium text-slate-700 italic">"${roomData.gameState.leaderInstructions.b1}"</p>
+        return `<div class="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-200">
+            <h2 class="text-lg font-bold text-slate-800 mb-2">⚖️ Baker 1: Mini-Quiz Penimbangan</h2>
+            <p class="text-[10px] mb-4 text-slate-500 bg-slate-50 p-2 border rounded">Tugas: Baca chat Leader dan masukkan angka gramasi dengan SANGAT PRESISI sesuai instruksinya.</p>
+            <div class="space-y-3 mb-6">
+                ${recipe.map((i, idx) => `
+                    <div class="flex items-center gap-3 bg-slate-50 p-2 rounded border text-sm">
+                        <span class="flex-1 font-semibold text-slate-700">${i.n}</span>
+                        <input type="number" id="bk1_gram_${idx}" placeholder="? g" class="w-20 p-1.5 border rounded outline-none text-center focus:border-blue-400 font-bold text-blue-700">
+                    </div>
+                `).join('')}
             </div>
-            <div class="grid grid-cols-2 gap-3 mb-4">
-                <div class="bg-slate-50 p-2 rounded border text-xs">
-                    <label class="block font-bold text-slate-700 mb-1">Ragi (g)</label>
-                    <input type="number" id="input_Ragi" class="w-full p-2 border rounded outline-none focus:border-blue-400">
-                </div>
-                <div class="bg-slate-50 p-2 rounded border text-xs">
-                    <label class="block font-bold text-slate-700 mb-1">Air (ml)</label>
-                    <input type="number" id="input_Air" class="w-full p-2 border rounded outline-none focus:border-blue-400">
-                </div>
-                <div class="bg-slate-50 p-2 rounded border text-xs col-span-2">
-                    <label class="block font-bold text-slate-700 mb-1">Pemanis Utama (g)</label>
-                    <input type="number" id="input_Pemanis" class="w-full p-2 border rounded outline-none focus:border-blue-400">
-                </div>
-            </div>
-            <button onclick="window.baker1Submit()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-xl text-sm shadow-md">Validasi Timbangan & Oper</button>
+            <button onclick="window.baker1Submit()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-xl text-sm shadow-md hover:bg-blue-700 transition">Timbang & Validasi</button>
         </div>`;
     }
 
@@ -552,90 +644,76 @@
         if (!roomData.gameState.baker1Done) return waitLeaderScreen('Menunggu Adonan Baker 1...');
         if (roomData.gameState.baker2Done) return doneScreen('Tugas Proses Selesai.');
 
-        return `<div class="bg-white p-4 md:p-6 rounded-xl md:rounded-2xl shadow-sm border border-slate-200">
+        return `<div class="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-200">
             <h2 class="text-lg font-bold text-slate-800 mb-2">🥣 Baker 2: Alur Produksi</h2>
-            <p class="text-xs mb-3 text-slate-600">Tugas: Cocokkan waktu produksi setiap proses sesuai petunjuk Leader.</p>
-            <div class="bg-indigo-50 p-3 rounded-lg border border-indigo-200 mb-4">
-                <span class="text-[10px] text-indigo-800 font-bold block mb-1">Catatan Sistem Leader:</span>
-                <p class="text-xs font-medium text-slate-700 italic">"${roomData.gameState.leaderInstructions.b2}"</p>
-            </div>
-            <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 mb-4 space-y-3 text-xs">
-                <div class="flex items-center gap-2">
-                    <span class="w-5 h-5 bg-slate-800 text-white rounded-full flex justify-center items-center">1</span> 
-                    <div class="flex-1 bg-white p-2 border rounded font-semibold text-slate-600">Pencampuran (Mixing)</div>
-                    <input type="number" id="time_1" placeholder="Mnt" class="w-16 p-2 border rounded outline-none text-center focus:border-indigo-400">
+            <p class="text-[10px] mb-4 text-slate-500 bg-slate-50 p-2 border rounded">Tugas: Pilih metode produksi dari dropdown di bawah agar sama persis dengan yang diperintahkan Leader di chat.</p>
+            
+            <div class="bg-white p-3 rounded-xl border border-slate-200 mb-4 space-y-3 text-xs shadow-inner">
+                <div class="flex flex-col gap-1">
+                    <label class="font-bold text-slate-600">1. Waktu Mixing</label>
+                    <select id="bk2_mix" class="w-full p-2 border rounded bg-slate-50 font-medium">${generateOptions(OPT.mix)}</select>
                 </div>
-                <div class="flex items-center gap-2">
-                    <span class="w-5 h-5 bg-slate-800 text-white rounded-full flex justify-center items-center">2</span> 
-                    <div class="flex-1 bg-white p-2 border rounded font-semibold text-slate-600">Fermentasi (Proofing)</div>
-                    <input type="number" id="time_2" placeholder="Mnt" class="w-16 p-2 border rounded outline-none text-center focus:border-indigo-400">
+                <div class="flex flex-col gap-1">
+                    <label class="font-bold text-slate-600">2. Jenis Proofing</label>
+                    <select id="bk2_proof" class="w-full p-2 border rounded bg-slate-50 font-medium">${generateOptions(OPT.proof)}</select>
                 </div>
-                <div class="flex items-center gap-2 opacity-60">
-                    <span class="w-5 h-5 bg-slate-400 text-white rounded-full flex justify-center items-center">3</span> 
-                    <div class="flex-1 bg-white p-2 border rounded">Pembentukan (Shaping)</div>
+                <div class="flex flex-col gap-1">
+                    <label class="font-bold text-slate-600">3. Bentuk Adonan</label>
+                    <select id="bk2_shape" class="w-full p-2 border rounded bg-slate-50 font-medium">${generateOptions(OPT.shape)}</select>
                 </div>
-                <div class="flex items-center gap-2 opacity-60">
-                    <span class="w-5 h-5 bg-slate-400 text-white rounded-full flex justify-center items-center">4</span> 
-                    <div class="flex-1 bg-white p-2 border rounded">Pemanggangan (Baking)</div>
+                <div class="flex flex-col gap-1">
+                    <label class="font-bold text-slate-600">4. Metode Masak</label>
+                    <select id="bk2_cook" class="w-full p-2 border rounded bg-slate-50 font-medium">${generateOptions(OPT.cook)}</select>
                 </div>
             </div>
-            <button onclick="window.baker2Submit()" class="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl text-sm shadow-md">Proses Selesai & Oper B3</button>
+            <button onclick="window.baker2Submit()" class="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl text-sm shadow-md hover:bg-indigo-700 transition">Proses & Oper B3</button>
         </div>`;
     }
 
     function renderBaker3Panel() {
-        if (!roomData.gameState.baker2Done) return waitLeaderScreen('Menunggu Roti dari Oven...');
+        if (!roomData.gameState.baker2Done) return waitLeaderScreen('Menunggu Roti dari Oven Baker 2...');
 
-        return `<div class="bg-white p-4 md:p-6 rounded-xl md:rounded-2xl shadow-sm border border-slate-200">
-            <h2 class="text-lg font-bold text-slate-800 mb-2">🎁 Baker 3: Finishing Akhir</h2>
-            <p class="text-xs mb-3 text-slate-600">Tugas: Lakukan finishing dengan tepat HANYA sesuai dengan instruksi yang diberikan oleh Leader.</p>
-            <div class="bg-red-50 p-3 rounded-lg border border-red-200 mb-4 shadow-inner">
-                <span class="text-[10px] text-red-800 font-bold block mb-1">Catatan Final Leader:</span>
-                <p class="text-sm font-bold bg-white p-2 rounded border border-red-100 text-slate-800">"${roomData.gameState.leaderInstructions.b3}"</p>
+        return `<div class="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-200">
+            <h2 class="text-lg font-bold text-slate-800 mb-2">🎁 Baker 3: Finishing & QC</h2>
+            <p class="text-[10px] mb-4 text-slate-500 bg-slate-50 p-2 border rounded">Tugas: Hias dan kemas sesuai instruksi chat Leader. Wajib centang seluruh Quality Control sebelum penyerahan.</p>
+            
+            <div class="space-y-3 mb-4 bg-white p-3 rounded border shadow-inner text-xs">
+                <div><label class="block font-bold text-slate-700 mb-1">Topping</label><select id="bk3_topping" class="w-full p-2 border rounded bg-slate-50 font-medium">${generateOptions(OPT.topping)}</select></div>
+                <div><label class="block font-bold text-slate-700 mb-1">Kemasan</label><select id="bk3_pack" class="w-full p-2 border rounded bg-slate-50 font-medium">${generateOptions(OPT.pack)}</select></div>
             </div>
-            <div class="space-y-4 mb-6">
-                <div>
-                    <label class="block text-xs font-bold mb-1 text-slate-700">Jenis Topping:</label>
-                    <select id="sel_topping" class="w-full p-3 border rounded-xl bg-slate-50 focus:border-amber-400 outline-none text-sm font-medium">
-                        <option value="Kacang Cincang Kasar">Kacang Cincang Kasar (Standar)</option>
-                        <option value="Keju Parut Lembut">Keju Parut Lembut</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-xs font-bold mb-1 text-slate-700">Metode Kemasan:</label>
-                    <select id="sel_packaging" class="w-full p-3 border rounded-xl bg-slate-50 focus:border-amber-400 outline-none text-sm font-medium">
-                        <option value="Plastik Ikat Kawat">Plastik Ikat Kawat (Standar Kuat)</option>
-                        <option value="Box Kertas Lipat">Box Kertas Lipat (Praktis/Mudah)</option>
-                    </select>
+
+            <div class="bg-green-50 p-3 rounded-xl border border-green-200 mb-4">
+                <label class="block font-bold text-green-900 mb-2 text-xs border-b border-green-200 pb-1">Checklist Quality Control (QC)</label>
+                <div class="space-y-2 text-xs text-slate-700">
+                    <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="qc_1" class="w-4 h-4 text-green-600 rounded"><span>Roti telah matang merata.</span></label>
+                    <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="qc_2" class="w-4 h-4 text-green-600 rounded"><span>Bentuk fisik roti konsisten.</span></label>
+                    <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="qc_3" class="w-4 h-4 text-green-600 rounded"><span>Topping dan Kemasan higienis.</span></label>
                 </div>
             </div>
-            <button onclick="window.baker3Submit()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl shadow-lg transition-transform hover:-translate-y-1 text-sm">KIRIM PESANAN KE KLIEN</button>
+            
+            <button onclick="window.baker3Submit()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl shadow-lg text-sm transition hover:-translate-y-1">QC LOLOS & KIRIM KE KLIEN</button>
         </div>`;
     }
 
-    function waitLeaderScreen(text) {
-        return `<div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center justify-center text-center h-full min-h-[300px]">
-            <div class="text-5xl mb-6 animate-spin duration-1000">⚙️</div>
-            <h3 class="text-sm font-bold text-slate-700 mb-2">${text}</h3>
-        </div>`;
-    }
-    function doneScreen(text) {
-        return `<div class="bg-green-50 p-8 rounded-2xl shadow-sm border border-green-200 flex flex-col items-center justify-center text-center h-full min-h-[300px]">
-            <div class="text-5xl mb-4 text-green-600">✓</div>
-            <h3 class="text-sm font-bold text-green-800">${text}</h3>
-        </div>`;
-    }
+    function waitLeaderScreen(text) { return `<div class="bg-white p-8 rounded-2xl border flex flex-col items-center justify-center text-center h-full"><div class="text-5xl mb-6 animate-spin duration-1000 opacity-50">⚙️</div><h3 class="text-sm font-bold text-slate-700">${text}</h3></div>`; }
+    function doneScreen(text) { return `<div class="bg-green-50 p-8 rounded-2xl border flex flex-col items-center justify-center text-center h-full"><div class="text-5xl mb-4 text-green-600">✓</div><h3 class="text-sm font-bold text-green-800">${text}</h3></div>`; }
 
     function renderResultHTML() {
-        const isSuccess = roomData.gameState.resultMsg.includes("LUAR BIASA");
-        return `<div class="h-full flex flex-col items-center justify-center p-4 fade-in">
-            <div class="glass-panel p-8 rounded-2xl shadow-2xl max-w-2xl w-full text-center">
+        const gs = roomData.gameState;
+        const isSuccess = gs.evalErrors.length === 0;
+        let errHtml = gs.evalErrors.map(e => `<li class="mb-1 text-xs">⚠️ ${e}</li>`).join('');
+
+        return `<div class="h-full flex flex-col items-center justify-center p-4 fade-in overflow-y-auto">
+            <div class="glass-panel p-6 md:p-8 rounded-2xl shadow-2xl max-w-2xl w-full text-center">
                 <div class="text-6xl mb-4">${isSuccess ? '🎉🏆🎉' : '💥🤦‍♂️💥'}</div>
                 <h2 class="text-2xl font-black mb-4 ${isSuccess ? 'text-green-600' : 'text-red-600'} uppercase">${isSuccess ? 'Misi Berhasil!' : 'Misi Gagal!'}</h2>
+                
                 <div class="bg-white p-4 rounded-xl border text-left mb-6 shadow text-slate-800 text-sm">
-                    <p class="font-medium leading-relaxed">${roomData.gameState.resultMsg}</p>
+                    <p class="font-bold text-base mb-2 border-b pb-2">Feedback Pelanggan:</p>
+                    <p class="mb-4 font-medium">${gs.resultMsg}</p>
+                    ${!isSuccess ? `<div class="bg-red-50 text-red-800 p-3 rounded-lg border border-red-200"><ul class="list-disc pl-4">${errHtml}</ul></div>` : '<div class="bg-green-50 text-green-800 p-3 rounded border border-green-200 font-medium">Seluruh kebutuhan teknis dan emosional klien terpenuhi dengan sempurna! Tim memiliki <strong>EMPATHY MINDSET</strong> yang sangat baik.</div>'}
                 </div>
-                <p class="text-xs text-slate-500 mt-4">Silakan baca evaluasi di Live Chat atau diskusi dengan Game Master.</p>
+                <p class="text-xs text-slate-500 mt-4">Simulasi selesai. Silakan lakukan evaluasi bersama Game Master.</p>
             </div>
         </div>`;
     }
