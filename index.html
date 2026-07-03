@@ -1,0 +1,773 @@
+```html
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bakery Squad: The Empathy Recipe</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #fdfbf7; }
+        .glass-panel { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); border: 1px solid rgba(226, 232, 240, 0.8); }
+        .chat-container::-webkit-scrollbar { width: 6px; }
+        .chat-container::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden text-slate-800 flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-amber-600 text-white p-4 shadow-md z-10 flex justify-between items-center">
+        <div class="flex items-center gap-2">
+            <span class="text-2xl">🥐</span>
+            <div>
+                <h1 class="text-xl font-bold leading-tight">Bakery Squad</h1>
+                <p class="text-xs text-amber-200">The Empathy Recipe Simulation</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-4">
+            <!-- GM Secret Button -->
+            <button onclick="window.promptGM()" id="gmBtn" class="text-xs bg-amber-800 text-amber-200 px-2 py-1 rounded hover:bg-amber-900 transition-colors hidden md:block" title="Claim SuperAdmin">👑 GM</button>
+            
+            <div id="userInfo" class="text-sm font-medium bg-amber-700 px-3 py-1 rounded-full hidden">
+                <span id="playerNameDisplay"></span> | <span id="playerRoleDisplay"></span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main id="app" class="flex-1 overflow-hidden relative w-full h-full p-2 md:p-4"></main>
+
+    <!-- Modal Overlay for Messages -->
+    <div id="modalOverlay" class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center fade-in">
+        <div class="bg-white rounded-xl p-6 max-w-sm w-full mx-4 shadow-2xl text-center">
+            <h3 id="modalTitle" class="text-xl font-bold mb-2">Pesan</h3>
+            <p id="modalMessage" class="text-slate-600 mb-6"></p>
+            <button onclick="closeModal()" class="bg-amber-500 hover:bg-amber-600 text-white px-6 py-2 rounded-lg font-semibold w-full transition-colors">Tutup</button>
+        </div>
+    </div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, updateDoc, onSnapshot, collection, getDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // --- Configuration & Constants ---
+    const appId = 'bakery-squad-sim';
+    const firebaseConfig = {
+        apiKey: "AIzaSyAtBziOTqs4GTx5DN6RS47MfWe_snCNQl8",
+        authDomain: "game-bakery-rakor.firebaseapp.com",
+        projectId: "game-bakery-rakor",
+        storageBucket: "game-bakery-rakor.firebasestorage.app",
+        messagingSenderId: "761276253953",
+        appId: "1:761276253953:web:90f8565ceb7d924688fd00"
+    };
+
+    let app, auth, db;
+    let currentUser = null;
+    let currentRoomId = null;
+    let currentRole = null;
+    let roomData = null;
+    let unsubscribeRoom = null;
+    let isGM = false; // State for SuperAdmin
+
+    const ROLES = {
+        spv: { id: 'spv', name: 'Supervisor', icon: '👔', desc: 'Pemegang rahasia klien.' },
+        leader: { id: 'leader', name: 'Leader', icon: '📋', desc: 'Jembatan komunikasi & penentu resep.' },
+        baker1: { id: 'baker1', name: 'Baker 1 (Prep)', icon: '⚖️', desc: 'Menimbang bahan sesuai instruksi.' },
+        baker2: { id: 'baker2', name: 'Baker 2 (Process)', icon: '🥣', desc: 'Mengurutkan SOP produksi.' },
+        baker3: { id: 'baker3', name: 'Baker 3 (Finish)', icon: '🎁', desc: 'Topping & Packaging.' }
+    };
+
+    // --- Game Scenario Definition ---
+    const SCENARIO = {
+        title: "Pesanan Roti Klien Lansia",
+        publicBrief: "Tim, tolong buatkan 1 porsi roti manis. Klien butuh secepatnya. Daftar bahan pokok ada di bawah, sisanya tolong Leader atur.",
+        scrambledIngredients: ["Tepung Terigu", "Ragi", "Air", "Pemanis", "Mentega"],
+        secretNeed: "Klien adalah seorang kakek. Giginya sudah sensitif jadi roti harus bertekstur sangat lembut (Proofing Lama). Dia diabetes jadi dilarang pakai gula pasir, pakai Stevia. Dia tidak bisa membuka kemasan plastik yang diikat keras, harus pakai Box Kertas.",
+        targetGramasi: { "Tepung Terigu": 250, "Ragi": 5, "Air": 150, "Pemanis": 15, "Mentega": 30 }, 
+        targetProcess: ["Mixing", "Proofing 1", "Shaping", "Proofing Lama", "Baking"], 
+        targetFinishing: { topping: "Keju Parut Lembut", packaging: "Box Kertas Lipat" }
+    };
+
+    // --- Utility Functions ---
+    const showModal = (title, msg) => {
+        document.getElementById('modalTitle').innerText = title;
+        document.getElementById('modalMessage').innerText = msg;
+        document.getElementById('modalOverlay').classList.remove('hidden');
+    };
+    window.closeModal = () => document.getElementById('modalOverlay').classList.add('hidden');
+    const getEl = (id) => document.getElementById(id);
+
+    // --- SuperAdmin GM Logic ---
+    window.promptGM = () => {
+        if (isGM) {
+            // Logout GM
+            isGM = false;
+            currentRoomId = null;
+            currentRole = null;
+            updateUI();
+            return;
+        }
+        const pass = prompt("Masukkan Password GM / Fasilitator:");
+        if (pass === "AKUGANTENG") {
+            isGM = true;
+            currentRoomId = null;
+            currentRole = null;
+            showModal("GM Mode Aktif", "Selamat datang Fasilitator. Anda memegang kendali penuh.");
+            updateUI();
+        } else if (pass !== null) {
+            alert("Password Salah!");
+        }
+    };
+
+    // --- Firebase Initialization & Auth ---
+    async function initFirebase() {
+        try {
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+
+            await signInAnonymously(auth);
+            currentUser = auth.currentUser;
+            updateUI();
+        } catch (error) {
+            console.error("Firebase init error:", error);
+            showModal("Koneksi Gagal", "Gagal terhubung ke server permainan. Pastikan pengaturan Firebase Rules sudah benar.");
+        }
+    }
+
+    const getRoomRef = (roomId) => doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId);
+
+    async function initializeRoomData(roomId) {
+        const roomRef = getRoomRef(roomId);
+        const docSnap = await getDoc(roomRef);
+        if (!docSnap.exists()) {
+            const initialData = {
+                id: roomId,
+                status: 'waiting', 
+                players: { spv: null, leader: null, baker1: null, baker2: null, baker3: null },
+                chat: [],
+                gameState: {
+                    leaderInstructions: { b1: "", b2: "", b3: "" },
+                    leaderGramasi: {},
+                    baker1Done: false,
+                    baker2Done: false,
+                    baker3Done: false,
+                    baker3Choices: { topping: "", packaging: "" },
+                    resultMsg: ""
+                }
+            };
+            await setDoc(roomRef, initialData);
+        }
+    }
+
+    async function joinRoom(roomId, asGM = false) {
+        currentRoomId = roomId;
+        await initializeRoomData(roomId);
+        
+        if (asGM) {
+            currentRole = 'gm';
+        }
+
+        if (unsubscribeRoom) unsubscribeRoom();
+        unsubscribeRoom = onSnapshot(getRoomRef(roomId), (snapshot) => {
+            if (snapshot.exists()) {
+                roomData = snapshot.data();
+                updateUI();
+            }
+        }, (error) => {
+            console.error("Sync error:", error);
+            showModal("Error", "Koneksi terputus dari ruangan.");
+        });
+    }
+
+    window.joinRoom = joinRoom;
+
+    async function selectRole(roleId) {
+        if (roomData.players[roleId] && roomData.players[roleId] !== currentUser.uid) {
+            showModal("Penuh", "Peran ini sudah diambil pemain lain.");
+            return;
+        }
+        
+        currentRole = roleId;
+        const roomRef = getRoomRef(currentRoomId);
+        await updateDoc(roomRef, {
+            [`players.${roleId}`]: currentUser.uid
+        });
+        
+        getEl('userInfo').classList.remove('hidden');
+        getEl('playerNameDisplay').innerText = `ID: ${currentUser.uid.substring(0,4)}`;
+        getEl('playerRoleDisplay').innerText = ROLES[roleId].name; 
+    }
+    window.selectRole = selectRole;
+
+    async function startGame() {
+        if (!roomData.players.spv || !roomData.players.leader) {
+            showModal("Tunggu", "Minimal SPV dan Leader harus hadir untuk memulai simulasi.");
+            return;
+        }
+        await updateDoc(getRoomRef(currentRoomId), { status: 'playing' });
+        sendSystemChat("▶️ PERMAINAN DIMULAI! Leader, segera kumpulkan informasi kebutuhan spesifik klien dari SPV.");
+    }
+    window.startGame = startGame;
+
+    async function sendChat(message) {
+        if (!message.trim()) return;
+        const senderName = isGM ? "👑 GM" : ROLES[currentRole].name;
+        const chatObj = {
+            sender: senderName,
+            roleId: currentRole,
+            text: message,
+            time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+        };
+        await updateDoc(getRoomRef(currentRoomId), { chat: arrayUnion(chatObj) });
+    }
+
+    async function sendSystemChat(message) {
+        const chatObj = { sender: "SISTEM NOTIFIKASI", roleId: "system", text: message, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) };
+        await updateDoc(getRoomRef(currentRoomId), { chat: arrayUnion(chatObj) });
+    }
+
+    window.handleChatSubmit = (e) => {
+        e.preventDefault();
+        const input = getEl('chatInput');
+        sendChat(input.value);
+        input.value = '';
+    };
+
+    // --- Action Handlers ---
+    window.leaderSubmit = async () => {
+        const gramasi = {};
+        SCENARIO.scrambledIngredients.forEach(item => {
+            gramasi[item] = document.getElementById(`gram_${item.replace(/\s+/g, '')}`).value || 0;
+        });
+        const instB1 = document.getElementById('inst_b1').value;
+        const instB2 = document.getElementById('inst_b2').value;
+        const instB3 = document.getElementById('inst_b3').value;
+
+        if(!instB1 || !instB2 || !instB3) { showModal("Peringatan", "Isi semua instruksi untuk Baker."); return; }
+
+        await updateDoc(getRoomRef(currentRoomId), {
+            'gameState.leaderGramasi': gramasi,
+            'gameState.leaderInstructions': { b1: instB1, b2: instB2, b3: instB3 }
+        });
+        sendSystemChat("Leader telah mengirimkan resep dan instruksi ke dapur produksi!");
+    };
+
+    window.baker1Check = (id) => {
+        document.getElementById(id).classList.add('bg-green-100', 'text-green-800', 'border-green-400');
+        document.getElementById(id).innerText = "Sudah Ditimbang ✅";
+    };
+
+    window.baker1Submit = async () => {
+        await updateDoc(getRoomRef(currentRoomId), { 'gameState.baker1Done': true });
+        sendSystemChat("Baker 1 selesai menimbang bahan baku presisi.");
+    };
+
+    window.baker2Submit = async () => {
+        await updateDoc(getRoomRef(currentRoomId), { 'gameState.baker2Done': true });
+        sendSystemChat("Baker 2 selesai mengurutkan proses dan roti masuk oven.");
+    };
+
+    window.baker3Submit = async () => {
+        const topping = document.getElementById('sel_topping').value;
+        const packaging = document.getElementById('sel_packaging').value;
+        
+        let resultMsg = "Pesanan Selesai! ";
+        let isSuccess = false;
+        let feedbackDetail = "";
+
+        if (topping === SCENARIO.targetFinishing.topping && packaging === SCENARIO.targetFinishing.packaging) {
+            resultMsg += "🎉 LUAR BIASA! Roti sangat sesuai dengan kondisi klien.";
+            feedbackDetail = "FEEDBACK: Empathy Mindset BERHASIL! Tim (terutama Leader) berhasil menggali informasi krusial bahwa klien adalah lansia dengan gigi sensitif, sehingga keputusan untuk menggunakan Keju Lembut dan Box Kertas yang mudah dibuka sangatlah tepat.";
+            isSuccess = true;
+        } else {
+            resultMsg += "❌ GAGAL! Klien komplain karena pesanan tidak sesuai ekspektasi. ";
+            feedbackDetail = "FEEDBACK: Empathy Mindset GAGAL! Tim berfokus pada kecepatan dan SOP namun kehilangan konteks pelanggan. ";
+            if (packaging !== SCENARIO.targetFinishing.packaging) feedbackDetail += "Kakek kesulitan dan harus merobek paksa kemasan plastik yang keras. ";
+            if (topping !== SCENARIO.targetFinishing.topping) feedbackDetail += "Topping yang keras melukai gigi sensitif kakek. ";
+            feedbackDetail += "Leader harusnya bertanya kepada SPV terkait 'kondisi/profil klien' di awal percakapan.";
+        }
+
+        await updateDoc(getRoomRef(currentRoomId), { 
+            'gameState.baker3Choices': { topping, packaging },
+            'gameState.baker3Done': true,
+            'gameState.resultMsg': resultMsg,
+            'status': 'finished'
+        });
+        
+        // Broadcast System Feedback to all players in the room
+        await sendSystemChat("🏁 SIMULASI BERAKHIR! " + resultMsg);
+        await sendSystemChat(feedbackDetail);
+    };
+
+    // --- GM Handlers ---
+    window.gmLeaveRoom = () => {
+        if(unsubscribeRoom) unsubscribeRoom();
+        currentRoomId = null;
+        currentRole = null;
+        updateUI();
+    };
+
+    window.gmResetChat = async () => {
+        if(confirm("GM: Yakin mereset seluruh chat di Room ini?")) {
+            await updateDoc(getRoomRef(currentRoomId), { chat: [] });
+            sendSystemChat("GM telah mereset riwayat chat.");
+        }
+    };
+
+    window.gmResetRoom = async () => {
+        if(confirm("GM: Yakin mereset status permainan di Room ini dari awal?")) {
+            await updateDoc(getRoomRef(currentRoomId), {
+                status: 'waiting',
+                chat: [],
+                gameState: { leaderInstructions: { b1: "", b2: "", b3: "" }, leaderGramasi: {}, baker1Done: false, baker2Done: false, baker3Done: false, baker3Choices: { topping: "", packaging: "" }, resultMsg: "" },
+                players: { spv: null, leader: null, baker1: null, baker2: null, baker3: null } // Optional: clear players too, but for now let's just clear state
+            });
+        }
+    };
+
+
+    // --- UI Renderers ---
+    function updateUI() {
+        const appDiv = getEl('app');
+        if (!currentRoomId) {
+            appDiv.innerHTML = renderLobbyHTML();
+        } else if (!currentRole) {
+            appDiv.innerHTML = renderRoleSelectionHTML();
+        } else {
+            if (currentRole === 'gm') {
+                appDiv.innerHTML = renderGMGameAreaHTML();
+            } else if (roomData.status === 'finished') {
+                appDiv.innerHTML = renderResultHTML();
+            } else {
+                appDiv.innerHTML = renderGameAreaHTML();
+            }
+            
+            // Auto scroll chat
+            const chatBox = getEl('chatHistoryBox');
+            if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    }
+
+    function renderLobbyHTML() {
+        let html = `
+            <div class="h-full flex flex-col items-center justify-center fade-in">
+                <div class="glass-panel p-8 rounded-2xl shadow-xl max-w-2xl w-full text-center border-t-8 border-t-amber-500">
+                    ${isGM ? '<div class="text-xs bg-red-600 text-white font-bold py-1 px-3 rounded-full inline-block mb-2">SUPER ADMIN MODE</div>' : ''}
+                    <h2 class="text-3xl font-bold text-amber-700 mb-2">Pilih Ruang Dapur</h2>
+                    <p class="text-slate-600 mb-8">Pilih ruangan ${isGM ? 'untuk dipantau (Spectate).' : 'bermain Anda.'}</p>
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+        `;
+        for (let i = 1; i <= 5; i++) {
+            const func = isGM ? `window.joinRoom('room_${i}', true)` : `window.joinRoom('room_${i}')`;
+            html += `<button onclick="${func}" class="bg-amber-50 hover:bg-amber-500 hover:text-white text-amber-800 font-bold py-6 rounded-xl transition-all border border-amber-200 shadow-sm flex flex-col items-center gap-2">
+                        <span class="text-3xl">🚪</span> R-${i}
+                     </button>`;
+        }
+        html += `</div></div></div>`;
+        return html;
+    }
+
+    function renderRoleSelectionHTML() {
+        let isSpvTaken = roomData.players.spv;
+        let isLeaderTaken = roomData.players.leader;
+        
+        let html = `
+            <div class="h-full flex flex-col items-center justify-center p-4 fade-in">
+                <div class="glass-panel p-6 rounded-2xl shadow-xl max-w-4xl w-full">
+                    <div class="flex justify-between items-center mb-6 border-b pb-4">
+                        <h2 class="text-2xl font-bold text-slate-800">Room: ${currentRoomId.replace('_', ' ').toUpperCase()}</h2>
+                        <!-- REMOVED BACK BUTTON FOR NORMAL PLAYERS to enforce commitment -->
+                    </div>
+                    <h3 class="text-xl font-semibold mb-4 text-center">Pilih Peran Anda</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+        `;
+
+        Object.values(ROLES).forEach(role => {
+            const isTaken = roomData.players[role.id];
+            const takenByMe = isTaken === currentUser.uid;
+            const btnClass = takenByMe ? 'bg-amber-500 text-white border-amber-600' : 
+                             isTaken ? 'bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200' : 
+                             'bg-white hover:border-amber-400 hover:shadow-md cursor-pointer border-slate-200';
+            
+            html += `
+                <div onclick="${isTaken && !takenByMe ? '' : `window.selectRole('${role.id}')`}" 
+                     class="border-2 rounded-xl p-4 flex flex-col items-center text-center transition-all ${btnClass}">
+                    <span class="text-4xl mb-2">${role.icon}</span>
+                    <h4 class="font-bold mb-1">${role.name}</h4>
+                    <p class="text-[10px] opacity-80">${role.desc}</p>
+                    ${isTaken ? `<span class="mt-2 text-[10px] bg-black/10 px-2 py-1 rounded-full">${takenByMe ? 'Anda' : 'Terisi'}</span>` : ''}
+                </div>
+            `;
+        });
+
+        html += `</div>
+                 <div class="text-center border-t pt-4">
+                    <p class="text-xs text-amber-700 font-bold mb-4 bg-amber-50 p-2 rounded inline-block">PERHATIAN: Setelah memilih peran, Anda tidak dapat kembali. Bertanggungjawablah pada tugas Anda!</p><br>
+                    <button onclick="window.startGame()" class="${isSpvTaken && isLeaderTaken ? 'bg-green-600 hover:bg-green-700' : 'bg-slate-300 cursor-not-allowed'} text-white font-bold py-3 px-8 rounded-full shadow-lg transition-all">Mulai Simulasi</button>
+                 </div>
+            </div></div>`;
+        return html;
+    }
+
+    function renderGameAreaHTML() {
+        return `
+            <div class="h-full flex flex-col md:flex-row gap-4 fade-in">
+                <!-- Chat Panel (Left) -->
+                <div class="w-full md:w-1/3 flex flex-col glass-panel rounded-2xl overflow-hidden shadow-sm border border-slate-200 h-64 md:h-full">
+                    <div class="bg-slate-100 p-3 border-b font-bold flex justify-between items-center">
+                        <span>💬 Komunikasi Tim</span>
+                        <span class="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> Live</span>
+                    </div>
+                    <div id="chatHistoryBox" class="flex-1 p-4 overflow-y-auto chat-container bg-white flex flex-col gap-3">
+                        ${renderChatMessages()}
+                    </div>
+                    <form onsubmit="window.handleChatSubmit(event)" class="p-3 bg-slate-50 border-t flex gap-2">
+                        <input type="text" id="chatInput" placeholder="Ketik pesan empati..." class="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:border-amber-400 text-sm" autocomplete="off">
+                        <button type="submit" class="bg-amber-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-amber-700 text-sm">Kirim</button>
+                    </form>
+                </div>
+
+                <!-- Action Panel (Right) -->
+                <div class="w-full md:w-2/3 flex flex-col gap-4 h-full overflow-y-auto pb-10 md:pb-0 chat-container">
+                    ${renderRoleSpecificPanel()}
+                </div>
+            </div>
+        `;
+    }
+
+    function renderGMGameAreaHTML() {
+        const gs = roomData.gameState;
+        return `
+            <div class="h-full flex flex-col md:flex-row gap-4 fade-in">
+                <!-- GM Chat Panel -->
+                <div class="w-full md:w-1/3 flex flex-col glass-panel rounded-2xl overflow-hidden shadow-md border-2 border-slate-800 h-64 md:h-full">
+                    <div class="bg-slate-800 text-white p-3 border-b font-bold flex justify-between items-center">
+                        <span>👑 GM Spectator Mode</span>
+                        <button onclick="window.gmLeaveRoom()" class="text-xs bg-red-500 hover:bg-red-600 px-2 py-1 rounded">Keluar Room</button>
+                    </div>
+                    <div id="chatHistoryBox" class="flex-1 p-4 overflow-y-auto chat-container bg-white flex flex-col gap-3">
+                        ${renderChatMessages()}
+                    </div>
+                    <form onsubmit="window.handleChatSubmit(event)" class="p-3 bg-slate-100 border-t flex gap-2">
+                        <input type="text" id="chatInput" placeholder="Kirim pengumuman GM..." class="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:border-slate-500 text-sm" autocomplete="off">
+                        <button type="submit" class="bg-slate-800 text-white px-4 py-2 rounded-lg font-bold text-sm">Umumkan</button>
+                    </form>
+                </div>
+
+                <!-- GM Dashboard Panel -->
+                <div class="w-full md:w-2/3 flex flex-col gap-4 overflow-y-auto pb-10 md:pb-0 chat-container">
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                        <div class="flex justify-between items-center mb-6 border-b pb-4">
+                            <h2 class="text-2xl font-bold text-slate-800">Dashboard Room: ${currentRoomId}</h2>
+                            <div class="flex gap-2">
+                                <button onclick="window.gmResetChat()" class="bg-orange-100 text-orange-700 px-3 py-1 rounded text-sm font-bold border border-orange-300 hover:bg-orange-200">Reset Chat</button>
+                                <button onclick="window.gmResetRoom()" class="bg-red-100 text-red-700 px-3 py-1 rounded text-sm font-bold border border-red-300 hover:bg-red-200">Reset Game Status</button>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-4 mb-6">
+                            <div class="bg-slate-50 p-4 rounded-xl border text-center">
+                                <h3 class="text-xs font-bold text-slate-500 mb-1">Baker 1 (Prep)</h3>
+                                <div class="text-lg font-bold ${gs.baker1Done ? 'text-green-600' : 'text-slate-400'}">${gs.baker1Done ? 'SELESAI ✅' : 'PROSES ⏳'}</div>
+                            </div>
+                            <div class="bg-slate-50 p-4 rounded-xl border text-center">
+                                <h3 class="text-xs font-bold text-slate-500 mb-1">Baker 2 (Process)</h3>
+                                <div class="text-lg font-bold ${gs.baker2Done ? 'text-green-600' : 'text-slate-400'}">${gs.baker2Done ? 'SELESAI ✅' : 'PROSES ⏳'}</div>
+                            </div>
+                            <div class="bg-slate-50 p-4 rounded-xl border text-center">
+                                <h3 class="text-xs font-bold text-slate-500 mb-1">Baker 3 (Finish)</h3>
+                                <div class="text-lg font-bold ${gs.baker3Done ? 'text-green-600' : 'text-slate-400'}">${gs.baker3Done ? 'SELESAI ✅' : 'PROSES ⏳'}</div>
+                            </div>
+                        </div>
+
+                        <div class="bg-blue-50 border border-blue-200 p-4 rounded-xl">
+                            <h3 class="font-bold text-blue-800 mb-3 border-b border-blue-200 pb-2">Instruksi Leader Terkini:</h3>
+                            <ul class="text-sm text-blue-900 space-y-2">
+                                <li><strong>B1:</strong> ${gs.leaderInstructions.b1 || '-'}</li>
+                                <li><strong>B2:</strong> ${gs.leaderInstructions.b2 || '-'}</li>
+                                <li><strong>B3 (Krusial):</strong> ${gs.leaderInstructions.b3 || '-'}</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function renderChatMessages() {
+        if (!roomData.chat || roomData.chat.length === 0) return `<div class="text-center text-slate-400 text-sm my-auto">Belum ada percakapan.<br>Leader, sapa SPV untuk memulai.</div>`;
+        
+        return roomData.chat.map(msg => {
+            const isMe = msg.roleId === currentRole;
+            const isSystem = msg.roleId === 'system';
+            const isGMMessage = msg.roleId === 'gm';
+            
+            if (isSystem) {
+                return `<div class="text-center text-xs font-bold text-amber-800 bg-amber-100 rounded-lg py-2 px-3 mx-auto my-1 border border-amber-200 w-full shadow-sm">${msg.text}</div>`;
+            }
+
+            if (isGMMessage) {
+                return `<div class="text-center text-xs font-bold text-white bg-slate-800 rounded-lg py-2 px-3 mx-auto my-1 border border-slate-900 w-full shadow-sm">👑 PENGUMUMAN: ${msg.text}</div>`;
+            }
+
+            return `
+                <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[85%] ${isMe ? 'ml-auto' : 'mr-auto'}">
+                    <span class="text-[10px] text-slate-400 mb-1 ml-1">${msg.sender} • ${msg.time}</span>
+                    <div class="p-3 rounded-2xl text-sm shadow-sm ${isMe ? 'bg-amber-100 text-amber-900 rounded-tr-none border border-amber-200' : 'bg-slate-50 text-slate-800 rounded-tl-none border border-slate-200'}">
+                        ${msg.text}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderRoleSpecificPanel() {
+        switch(currentRole) {
+            case 'spv': return renderSPVPanel();
+            case 'leader': return renderLeaderPanel();
+            case 'baker1': return renderBaker1Panel();
+            case 'baker2': return renderBaker2Panel();
+            case 'baker3': return renderBaker3Panel();
+            default: return `<div>Error Role</div>`;
+        }
+    }
+
+    function renderSPVPanel() {
+        return `
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2 mb-4">👔 Misi Supervisor</h2>
+                <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-4 rounded-r shadow-sm">
+                    <h3 class="font-bold text-blue-800 mb-1">Pesanan Awal Klien:</h3>
+                    <p class="text-sm text-blue-900">${SCENARIO.publicBrief}</p>
+                </div>
+                
+                <div class="bg-red-50 border border-red-200 p-4 rounded-xl mb-4 relative overflow-hidden shadow-inner">
+                    <div class="absolute top-0 right-0 bg-red-600 text-white text-[10px] font-bold px-3 py-1 rounded-bl-lg tracking-wider">RAHASIA</div>
+                    <h3 class="font-bold text-red-800 mb-2">🕵️ Kebutuhan Emosional Klien</h3>
+                    <p class="text-xs text-red-900 mb-2 italic bg-white p-2 rounded">SOP GM: Jangan beritahu Leader secara langsung kecuali mereka proaktif bertanya tentang "kondisi klien", "siapa yang makan", atau "apakah ada request khusus". Jika mereka kaku dan hanya bahas teknis bahan, diamkan saja pesannya!</p>
+                    <p class="text-sm font-semibold text-slate-800 bg-white p-3 rounded border border-red-100 mt-2">${SCENARIO.secretNeed}</p>
+                </div>
+
+                <div class="mb-4">
+                    <h3 class="font-bold text-slate-700 mb-2 text-sm">Bahan Baku Mentah (Berikan ke Leader):</h3>
+                    <div class="flex flex-wrap gap-2">
+                        ${SCENARIO.scrambledIngredients.map(item => `<span class="bg-slate-100 px-3 py-1 rounded-full text-sm border border-slate-300 shadow-sm">${item}</span>`).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function renderLeaderPanel() {
+        const isSent = Object.keys(roomData.gameState.leaderGramasi || {}).length > 0;
+        
+        let html = `
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h2 class="text-xl font-bold text-amber-600 flex items-center gap-2 mb-2">📋 Meja Leader</h2>
+                <p class="text-xs text-slate-600 mb-4 bg-amber-50 p-3 rounded-lg border border-amber-200">⚠️ <strong>TUGAS:</strong> Gali informasi dari SPV via Chat. Apa kebutuhan spesifik klien? Jangan menebak! Setelah konteks jelas, buat resep dan instruksikan ke Baker.</p>
+                
+                ${isSent ? `
+                    <div class="bg-green-50 text-green-800 p-6 rounded-xl border border-green-200 text-center shadow-sm">
+                        <div class="text-3xl mb-2">🚀</div>
+                        <h3 class="font-bold text-lg">Instruksi Terkirim</h3>
+                        <p class="text-sm">Pantau proses di dapur produksi melalui notifikasi sistem.</p>
+                    </div>
+                ` : `
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm">
+                            <h3 class="font-bold text-sm mb-3">1. Tentukan Takaran (Gram)</h3>
+                            <div class="space-y-2">
+                                ${SCENARIO.scrambledIngredients.map(item => `
+                                    <div class="flex justify-between items-center bg-white p-2 rounded border shadow-sm hover:border-amber-300 transition-colors">
+                                        <span class="text-sm font-medium w-1/2">${item}</span>
+                                        <input type="number" id="gram_${item.replace(/\s+/g, '')}" placeholder="0" class="w-20 px-2 py-1 text-sm border rounded text-right focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none">
+                                        <span class="text-xs text-slate-400 ml-2 font-bold">g</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="bg-blue-50 p-3 rounded-xl border border-blue-200 shadow-sm">
+                                <label class="text-xs font-bold text-blue-900 mb-1 block">Instruksi B1 (Preparasi)</label>
+                                <input type="text" id="inst_b1" placeholder="Cth: Timbang presisi..." class="w-full px-3 py-2 text-sm border rounded focus:outline-none focus:border-blue-500">
+                            </div>
+                            <div class="bg-indigo-50 p-3 rounded-xl border border-indigo-200 shadow-sm">
+                                <label class="text-xs font-bold text-indigo-900 mb-1 block">Instruksi B2 (Proses)</label>
+                                <input type="text" id="inst_b2" placeholder="Cth: Lakukan proofing lama..." class="w-full px-3 py-2 text-sm border rounded focus:outline-none focus:border-indigo-500">
+                            </div>
+                            <div class="bg-amber-100 p-3 rounded-xl border-2 border-amber-300 shadow-md relative">
+                                <span class="absolute -top-2 -right-2 bg-red-500 text-white text-[9px] px-2 py-1 rounded-full animate-bounce">KRUSIAL</span>
+                                <label class="text-xs font-bold text-amber-900 mb-1 block">Instruksi B3 (Finishing)</label>
+                                <textarea id="inst_b3" rows="3" placeholder="Tulis instruksi topping & kemasan berdasarkan kebutuhan/empati klien yang Anda gali dari SPV..." class="w-full px-3 py-2 text-sm border rounded focus:outline-none focus:border-amber-500 resize-none shadow-inner"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                    <button onclick="window.leaderSubmit()" class="mt-6 w-full bg-slate-800 hover:bg-black text-white font-bold py-4 rounded-xl shadow-lg transition-transform hover:-translate-y-1">Kirim SOP ke Lini Produksi</button>
+                `}
+            </div>
+        `;
+        return html;
+    }
+
+    function renderBaker1Panel() {
+        const inst = roomData.gameState.leaderInstructions.b1;
+        const gramasi = roomData.gameState.leaderGramasi;
+        const isReady = Object.keys(gramasi || {}).length > 0;
+        const isDone = roomData.gameState.baker1Done;
+
+        if (!isReady) return waitLeaderScreen('Baker 1: Menunggu Resep...');
+        if (isDone) return doneScreen('Tugas Preparasi Selesai. Menunggu Baker 2 & 3.');
+
+        return `
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h2 class="text-xl font-bold text-slate-800 mb-2">⚖️ Stasiun Baker 1 (Preparasi)</h2>
+                <div class="bg-amber-50 p-4 rounded-lg border border-amber-200 mb-6 shadow-sm">
+                    <span class="text-xs text-amber-800 font-bold mb-1 block border-b border-amber-200 pb-1">Catatan Leader:</span>
+                    <p class="text-sm font-bold text-slate-700 italic">"${inst}"</p>
+                </div>
+                
+                <h3 class="font-bold text-sm mb-3">Verifikasi Penimbangan: Klik untuk menimbang</h3>
+                <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+                    ${Object.entries(gramasi).map(([item, qty], idx) => `
+                        <button id="btn_timbang_${idx}" onclick="window.baker1Check('btn_timbang_${idx}')" class="bg-slate-50 border-2 border-slate-200 p-3 rounded-xl text-center shadow-sm hover:bg-slate-100 transition-colors text-left flex flex-col items-center justify-center h-24">
+                            <div class="text-xs font-bold text-slate-500 mb-1">${item}</div>
+                            <div class="text-xl font-black text-slate-800">${qty} <span class="text-xs font-normal">g</span></div>
+                            <div class="mt-2 text-[9px] text-slate-400">Klik Verifikasi</div>
+                        </button>
+                    `).join('')}
+                </div>
+                <button onclick="window.baker1Submit()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg transition-transform hover:-translate-y-1">Selesai Menimbang & Oper ke B2</button>
+            </div>
+        `;
+    }
+
+    function renderBaker2Panel() {
+        const inst = roomData.gameState.leaderInstructions.b2;
+        const isReady = roomData.gameState.baker1Done;
+        const isDone = roomData.gameState.baker2Done;
+
+        if (!isReady) return waitLeaderScreen('Baker 2: Menunggu Adonan dari Baker 1...');
+        if (isDone) return doneScreen('Tugas Proses Selesai. Menunggu Baker 3.');
+
+        return `
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h2 class="text-xl font-bold text-slate-800 mb-2">🥣 Stasiun Baker 2 (Proses)</h2>
+                <div class="bg-indigo-50 p-4 rounded-lg border border-indigo-200 mb-6 shadow-sm">
+                    <span class="text-xs text-indigo-800 font-bold mb-1 block border-b border-indigo-200 pb-1">Catatan Leader:</span>
+                    <p class="text-sm font-bold text-slate-700 italic">"${inst}"</p>
+                </div>
+                
+                <h3 class="font-bold text-sm mb-3">Tugas: Tentukan Urutan Produksi</h3>
+                <div class="bg-slate-50 p-5 rounded-xl border border-slate-200 mb-6 space-y-3 shadow-inner">
+                    <div class="flex items-center gap-3"><span class="bg-slate-800 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs shadow">1</span> <select class="flex-1 p-3 border rounded-lg bg-white shadow-sm"><option>Mixing</option></select></div>
+                    <div class="flex items-center gap-3"><span class="bg-slate-800 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs shadow">2</span> 
+                        <select class="flex-1 p-3 border rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-indigo-400 outline-none">
+                            <option>Proofing Awal (Standar)</option>
+                            <option>Proofing Lama (Tekstur Sangat Lembut)</option>
+                        </select>
+                    </div>
+                    <div class="flex items-center gap-3"><span class="bg-slate-800 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs shadow">3</span> <select class="flex-1 p-3 border rounded-lg bg-white shadow-sm"><option>Shaping</option></select></div>
+                    <div class="flex items-center gap-3"><span class="bg-slate-800 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs shadow">4</span> <select class="flex-1 p-3 border rounded-lg bg-white shadow-sm"><option>Baking</option></select></div>
+                </div>
+                <button onclick="window.baker2Submit()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-transform hover:-translate-y-1">Adonan Masuk Oven & Oper ke B3</button>
+            </div>
+        `;
+    }
+
+    function renderBaker3Panel() {
+        const inst = roomData.gameState.leaderInstructions.b3;
+        const isReady = roomData.gameState.baker2Done;
+
+        if (!isReady) return waitLeaderScreen('Baker 3: Menunggu Roti Matang dari Baker 2...');
+
+        return `
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h2 class="text-xl font-bold text-slate-800 mb-2">🎁 Stasiun Baker 3 (Finishing)</h2>
+                <div class="bg-red-50 p-5 rounded-xl border border-red-200 mb-6 shadow-sm relative">
+                    <span class="absolute -top-3 -left-3 text-3xl animate-pulse">🚨</span>
+                    <span class="text-xs text-red-800 font-bold mb-1 block border-b border-red-200 pb-1 ml-4">Catatan Leader (SANGAT KRUSIAL):</span>
+                    <p class="text-lg font-black text-slate-800 mt-2 text-center bg-white p-3 rounded border border-red-100 shadow-inner">"${inst}"</p>
+                    <p class="text-[10px] text-red-600 mt-2 font-bold text-center">Tentukan nasib kepuasan klien berdasarkan catatan di atas!</p>
+                </div>
+                
+                <div class="space-y-5 mb-8 bg-slate-50 p-5 rounded-xl border border-slate-200">
+                    <div>
+                        <label class="block text-sm font-bold mb-2 text-slate-700">Pilih Topping:</label>
+                        <select id="sel_topping" class="w-full p-3 border-2 border-slate-300 rounded-xl bg-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none shadow-sm font-medium">
+                            <option value="Kacang Cincang Kasar">Kacang Cincang Kasar (Standar)</option>
+                            <option value="Keju Parut Lembut">Keju Parut Lembut</option>
+                            <option value="Cokelat Butir">Cokelat Butir</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold mb-2 text-slate-700">Pilih Kemasan:</label>
+                        <select id="sel_packaging" class="w-full p-3 border-2 border-slate-300 rounded-xl bg-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none shadow-sm font-medium">
+                            <option value="Plastik Ikat Kawat">Plastik Ikat Kawat (Standar Keras)</option>
+                            <option value="Box Kertas Lipat">Box Kertas Lipat (Mudah Dibuka)</option>
+                        </select>
+                    </div>
+                </div>
+                <button onclick="window.baker3Submit()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl shadow-xl transition-transform hover:-translate-y-1 text-lg">SELESAIKAN PESANAN & KIRIM!</button>
+            </div>
+        `;
+    }
+
+    function waitLeaderScreen(text) {
+        return `<div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center justify-center text-center h-full min-h-[300px]">
+            <div class="text-5xl mb-6 animate-spin duration-1000">⚙️</div>
+            <h3 class="text-xl font-bold text-slate-700 mb-2">${text}</h3>
+            <p class="text-sm text-slate-500 bg-slate-50 p-3 rounded-lg border">Perhatikan Live Chat di sebelah kiri untuk memantau proses negosiasi dan koordinasi tim.</p>
+        </div>`;
+    }
+
+    function doneScreen(text) {
+        return `<div class="bg-green-50 p-8 rounded-2xl shadow-sm border border-green-200 flex flex-col items-center justify-center text-center h-full min-h-[300px]">
+            <div class="text-5xl mb-4 bg-green-200 w-20 h-20 flex items-center justify-center rounded-full text-green-700 mx-auto shadow-inner">✓</div>
+            <h3 class="text-xl font-bold text-green-800">${text}</h3>
+            <p class="text-sm text-green-600 mt-2">Bantu pantau rekan Anda di Live Chat jika dibutuhkan.</p>
+        </div>`;
+    }
+
+    function renderResultHTML() {
+        const isSuccess = roomData.gameState.resultMsg.includes("LUAR BIASA");
+        const msg = roomData.gameState.resultMsg;
+
+        return `
+            <div class="h-full flex flex-col items-center justify-center p-4 fade-in">
+                <div class="glass-panel p-8 rounded-2xl shadow-2xl max-w-3xl w-full text-center">
+                    <div class="text-7xl mb-6 drop-shadow-md">${isSuccess ? '🎉🏆🎉' : '💥🤦‍♂️💥'}</div>
+                    <h2 class="text-3xl font-black mb-4 ${isSuccess ? 'text-green-600' : 'text-red-600'} uppercase tracking-wide">
+                        ${isSuccess ? 'Misi Berhasil!' : 'Misi Gagal!'}
+                    </h2>
+                    
+                    <div class="bg-white p-6 rounded-xl border border-slate-200 text-left mb-6 shadow text-slate-800">
+                        <p class="text-lg font-medium leading-relaxed">${msg}</p>
+                    </div>
+
+                    <div class="bg-amber-50 border-2 border-amber-300 p-6 rounded-xl mb-8 text-sm text-amber-900 text-left shadow-inner relative overflow-hidden">
+                        <div class="absolute top-0 right-0 opacity-10 text-6xl rotate-12">💡</div>
+                        <h4 class="font-bold mb-2 text-lg border-b border-amber-300 pb-2">💡 Refleksi (Customer Empathy):</h4>
+                        <p class="text-base leading-relaxed">Sebagai eksekutor (Baker), mematuhi SOP adalah kewajiban. Namun bagi Leader dan SPV, <strong>memahami konteks dan kebutuhan sebenarnya</strong> dari pelanggan sebelum mesin produksi berjalan adalah kunci kepuasan. Komunikasi proaktif dan empati menghindarkan tim dari kerja keras yang tidak tepat sasaran.</p>
+                    </div>
+
+                    <p class="text-xs text-slate-400 mt-4">Silakan baca evaluasi detail di Live Chat atau tunggu instruksi Fasilitator (GM).</p>
+                </div>
+            </div>
+        `;
+    }
+
+    // --- Start ---
+    window.onload = initFirebase;
+
+</script>
+</body>
+</html>
+
+
+```
