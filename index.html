@@ -204,6 +204,23 @@
         }
     }
 
+    // SFX Interaktif untuk Hasil Akhir Game
+    function playResultSound(success) {
+        if (!synth) return;
+        const now = Tone.now();
+        if (success) {
+            // Suara Menang (Ceria)
+            synth.triggerAttackRelease("C5", "8n", now);
+            synth.triggerAttackRelease("E5", "8n", now + 0.15);
+            synth.triggerAttackRelease("G5", "8n", now + 0.3);
+            synth.triggerAttackRelease("C6", "4n", now + 0.45);
+        } else {
+            // Suara Kalah (Sedih/Gagal)
+            synth.triggerAttackRelease("G4", "4n", now);
+            synth.triggerAttackRelease("C4", "2n", now + 0.3);
+        }
+    }
+
     window.promptGM = async () => {
         await initAudio();
         if (isGM) { 
@@ -293,6 +310,23 @@
             });
         }
         showModal("Reset Sukses", "Seluruh room telah dikosongkan dan direset.");
+    };
+
+    // Fitur Reset Spesifik Room untuk GM
+    window.gmResetChat = async () => {
+        if(!confirm("Yakin ingin mereset seluruh riwayat obrolan di ruangan ini?")) return;
+        await updateDoc(getRoomRef(currentRoomId), { chat: [] });
+        sendSystemChat("🧹 Game Master telah membersihkan riwayat obrolan.");
+    };
+
+    window.gmResetRoom = async () => {
+        if(!confirm("Yakin ingin mereset progres simulasi di ruangan ini dari awal? Peran pemain tidak akan dihapus, hanya mereset alur.")) return;
+        await updateDoc(getRoomRef(currentRoomId), {
+            status: 'playing',
+            chat: [],
+            gameState: { spvFirstMessageSent: false, leaderSopSent: false, spvMentioned: false, leaderRecipe: null, baker1Done: false, baker2Done: false, baker3Done: false, resultMsg: "", evalErrors: [] }
+        });
+        sendSystemChat("🔄 Game Master telah mereset progres simulasi ke awal.");
     };
 
     window.selectRole = async (roleId) => {
@@ -442,6 +476,7 @@
             'status': 'finished' 
         });
         
+        playResultSound(isSuccess); // Pemicu SFX Menang/Kalah
         await sendSystemChat("🏁 PRODUKSI SELESAI & DISERAHKAN! Hasil: " + resultMsg);
     };
 
@@ -529,24 +564,30 @@
             return `<div class="flex flex-col lg:flex-row gap-4 w-full fade-in">
                 <div class="w-full lg:w-1/3 flex flex-col glass-panel rounded-xl shadow-md border-2 border-slate-800 h-[500px] lg:h-[700px] shrink-0">
                     <div class="bg-slate-800 text-white p-3 border-b font-bold flex justify-between items-center text-sm">
-                        <span>👑 GM Monitor</span><button onclick="window.leaveRoom()" class="text-[10px] bg-red-500 hover:bg-red-600 px-2 py-1 rounded">⬅ Keluar Room</button>
+                        <span>👑 GM Monitor</span><button onclick="window.leaveRoom()" class="text-[10px] bg-red-500 hover:bg-red-600 px-2 py-1 rounded transition-colors">⬅ Keluar Room</button>
                     </div>
                     <div id="chatHistoryBox" class="flex-1 p-3 overflow-y-auto chat-container bg-slate-50 flex flex-col gap-2">${renderChatMessages()}</div>
                     ${chatInputSection}
                 </div>
                 <div class="w-full lg:w-2/3 flex flex-col gap-4">
                     <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 text-sm">
-                        <h2 class="text-xl font-bold border-b pb-2 mb-4">Status Dashboard Room: ${currentRoomId}</h2>
+                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b pb-3 mb-4 gap-3">
+                            <h2 class="text-xl font-bold text-slate-800">Dashboard: ${currentRoomId.replace('_', ' ').toUpperCase()}</h2>
+                            <div class="flex gap-2">
+                                <button onclick="window.gmResetChat()" class="text-xs bg-orange-100 hover:bg-orange-500 hover:text-white text-orange-700 font-bold py-1.5 px-3 rounded border border-orange-300 transition-all shadow-sm">🧹 Reset Chat</button>
+                                <button onclick="window.gmResetRoom()" class="text-xs bg-red-100 hover:bg-red-500 hover:text-white text-red-700 font-bold py-1.5 px-3 rounded border border-red-300 transition-all shadow-sm">🔄 Reset Game Progres</button>
+                            </div>
+                        </div>
                         <ul class="space-y-2 mb-4 font-semibold text-slate-700">
-                            <li class="flex justify-between items-center p-2 bg-slate-50 rounded"><span>SOP dari Leader:</span> <span>${roomData.gameState.leaderSopSent ? '✅ Terkirim' : '❌ Belum'}</span></li>
-                            <li class="flex justify-between items-center p-2 bg-slate-50 rounded"><span>Status SPV:</span> <span>${roomData.gameState.spvMentioned ? '✅ Bisa Intervensi (Mentioned)' : (roomData.gameState.leaderSopSent ? '🔒 Terkunci' : '✅ Bebas')}</span></li>
-                            <li class="flex justify-between items-center p-2 bg-slate-50 rounded"><span>Baker 1 (Prep):</span> <span>${roomData.gameState.baker1Done ? '✅ Selesai' : '⏳ Proses'}</span></li>
-                            <li class="flex justify-between items-center p-2 bg-slate-50 rounded"><span>Baker 2 (Cook):</span> <span>${roomData.gameState.baker2Done ? '✅ Selesai' : '⏳ Proses'}</span></li>
-                            <li class="flex justify-between items-center p-2 bg-slate-50 rounded"><span>Baker 3 (Finish):</span> <span>${roomData.gameState.baker3Done ? '✅ Selesai' : '⏳ Proses'}</span></li>
+                            <li class="flex justify-between items-center p-3 bg-slate-50 rounded-lg border-l-4 ${roomData.gameState.leaderSopSent ? 'border-green-500' : 'border-slate-300'} shadow-sm transition-colors"><span>SOP dari Leader:</span> <span>${roomData.gameState.leaderSopSent ? '✅ Terkirim' : '❌ Belum'}</span></li>
+                            <li class="flex justify-between items-center p-3 bg-slate-50 rounded-lg border-l-4 ${roomData.gameState.spvMentioned ? 'border-amber-500' : 'border-slate-300'} shadow-sm transition-colors"><span>Status Akses Chat SPV:</span> <span>${roomData.gameState.spvMentioned ? '🔓 Terbuka (Mentioned)' : (roomData.gameState.leaderSopSent ? '🔒 Terkunci' : '✅ Bebas')}</span></li>
+                            <li class="flex justify-between items-center p-3 bg-slate-50 rounded-lg border-l-4 ${roomData.gameState.baker1Done ? 'border-blue-500' : 'border-slate-300'} shadow-sm transition-colors"><span>Baker 1 (Prep):</span> <span>${roomData.gameState.baker1Done ? '✅ Selesai' : '⏳ Proses'}</span></li>
+                            <li class="flex justify-between items-center p-3 bg-slate-50 rounded-lg border-l-4 ${roomData.gameState.baker2Done ? 'border-indigo-500' : 'border-slate-300'} shadow-sm transition-colors"><span>Baker 2 (Cook):</span> <span>${roomData.gameState.baker2Done ? '✅ Selesai' : '⏳ Proses'}</span></li>
+                            <li class="flex justify-between items-center p-3 bg-slate-50 rounded-lg border-l-4 ${roomData.gameState.baker3Done ? 'border-green-500' : 'border-slate-300'} shadow-sm transition-colors"><span>Baker 3 (Finish):</span> <span>${roomData.gameState.baker3Done ? '✅ Selesai' : '⏳ Proses'}</span></li>
                         </ul>
-                        <div class="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                            <strong class="text-red-800 block mb-1">Target Rahasia Klien:</strong>
-                            <p class="text-red-700">${getScenario().secretNeed}</p>
+                        <div class="mt-6 p-4 bg-red-50 border border-red-200 rounded-xl shadow-inner">
+                            <strong class="text-red-800 block mb-2 text-base">🎯 Target Rahasia Klien:</strong>
+                            <p class="text-red-700 font-medium leading-relaxed">${getScenario().secretNeed}</p>
                         </div>
                     </div>
                 </div>
@@ -687,14 +728,14 @@
             <p class="text-xs mb-6 text-slate-600 bg-blue-50 p-3 border border-blue-200 rounded-lg">Tugas: Baca chat Leader dan masukkan angka gramasi dengan SANGAT PRESISI sesuai instruksinya.</p>
             <div class="space-y-4 mb-8">
                 ${recipe.map((i, idx) => `
-                    <div class="flex items-center gap-4 bg-slate-50 p-3 rounded-xl border text-base shadow-sm focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400 transition-all">
+                    <div class="flex items-center gap-4 bg-slate-50 p-3 rounded-xl border text-base shadow-sm focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-400 transition-all hover:shadow-md transform hover:-translate-y-0.5">
                         <span class="flex-1 font-bold text-slate-700">${i.n}</span>
-                        <input type="number" id="bk1_gram_${idx}" placeholder="0" class="w-24 p-2 border rounded-lg outline-none text-center font-black text-blue-700 bg-white shadow-inner">
+                        <input type="number" id="bk1_gram_${idx}" placeholder="0" class="w-24 p-2 border rounded-lg outline-none text-center font-black text-blue-700 bg-white shadow-inner transition-colors">
                         <span class="text-sm font-bold text-slate-400">g</span>
                     </div>
                 `).join('')}
             </div>
-            <button onclick="window.baker1Submit()" class="w-full bg-blue-600 text-white font-bold py-4 rounded-xl text-base shadow-lg hover:bg-blue-700 transition hover:-translate-y-1">Timbang & Validasi</button>
+            <button onclick="window.baker1Submit()" class="w-full bg-blue-600 text-white font-bold py-4 rounded-xl text-base shadow-lg hover:bg-blue-700 transition-all hover:-translate-y-1 active:scale-95">Timbang & Validasi</button>
         </div>`;
     }
 
@@ -749,13 +790,22 @@
             <div class="bg-white p-4 rounded-xl border border-slate-200 mb-8 shadow-sm">
                 <label class="block font-bold text-slate-800 mb-3 text-sm border-b pb-2">Checklist Quality Control (QC)</label>
                 <div class="space-y-3 text-sm text-slate-700 font-medium">
-                    <label class="flex items-center gap-3 cursor-pointer p-2 hover:bg-slate-50 rounded transition-colors"><input type="checkbox" id="qc_1" class="w-5 h-5 text-green-600 rounded focus:ring-0 cursor-pointer"><span>Roti telah matang merata.</span></label>
-                    <label class="flex items-center gap-3 cursor-pointer p-2 hover:bg-slate-50 rounded transition-colors"><input type="checkbox" id="qc_2" class="w-5 h-5 text-green-600 rounded focus:ring-0 cursor-pointer"><span>Bentuk fisik roti konsisten.</span></label>
-                    <label class="flex items-center gap-3 cursor-pointer p-2 hover:bg-slate-50 rounded transition-colors"><input type="checkbox" id="qc_3" class="w-5 h-5 text-green-600 rounded focus:ring-0 cursor-pointer"><span>Topping dan Kemasan higienis.</span></label>
+                    <label class="flex items-center gap-3 cursor-pointer p-3 hover:bg-green-50 rounded-lg transition-all border border-transparent hover:border-green-200 group">
+                        <input type="checkbox" id="qc_1" class="w-6 h-6 text-green-600 rounded focus:ring-0 cursor-pointer shadow-sm">
+                        <span class="group-hover:text-green-800">Roti telah matang merata.</span>
+                    </label>
+                    <label class="flex items-center gap-3 cursor-pointer p-3 hover:bg-green-50 rounded-lg transition-all border border-transparent hover:border-green-200 group">
+                        <input type="checkbox" id="qc_2" class="w-6 h-6 text-green-600 rounded focus:ring-0 cursor-pointer shadow-sm">
+                        <span class="group-hover:text-green-800">Bentuk fisik roti konsisten.</span>
+                    </label>
+                    <label class="flex items-center gap-3 cursor-pointer p-3 hover:bg-green-50 rounded-lg transition-all border border-transparent hover:border-green-200 group">
+                        <input type="checkbox" id="qc_3" class="w-6 h-6 text-green-600 rounded focus:ring-0 cursor-pointer shadow-sm">
+                        <span class="group-hover:text-green-800">Topping dan Kemasan higienis.</span>
+                    </label>
                 </div>
             </div>
             
-            <button onclick="window.baker3Submit()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl shadow-lg text-base transition hover:-translate-y-1">QC LOLOS & KIRIM KE KLIEN</button>
+            <button onclick="window.baker3Submit()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl shadow-lg text-base transition-all hover:-translate-y-1 active:scale-95 animate-pulse hover:animate-none">QC LOLOS & KIRIM KE KLIEN</button>
         </div>`;
     }
 
