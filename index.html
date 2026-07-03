@@ -20,7 +20,6 @@
             -ms-user-select: none;
             user-select: none;
         }
-        /* Izinkan pengetikan di dalam input/textarea */
         input, textarea, select {
             -webkit-user-select: auto;
             user-select: auto;
@@ -33,12 +32,12 @@
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         
         .mention { color: #d97706; font-weight: bold; background: #fef3c7; padding: 0 4px; border-radius: 4px; border: 1px solid #fde68a; }
-        .reply-box { border-left: 3px solid #f59e0b; padding-left: 8px; margin-bottom: 4px; font-size: 0.75rem; background: rgba(0,0,0,0.03); border-radius: 0 4px 4px 0;}
+        .reply-box { border-left: 3px solid rgba(0,0,0,0.2); padding-left: 8px; margin-bottom: 6px; font-size: 0.75rem; background: rgba(0,0,0,0.05); border-radius: 0 6px 6px 0; padding-top: 4px; padding-bottom: 4px;}
     </style>
 </head>
-<body class="h-screen w-screen overflow-hidden text-slate-800 flex flex-col">
+<body class="min-h-screen text-slate-800 flex flex-col">
 
-    <header class="bg-amber-600 text-white p-3 md:p-4 shadow-md z-10 flex justify-between items-center shrink-0">
+    <header class="bg-amber-600 text-white p-3 md:p-4 shadow-md z-20 sticky top-0 flex justify-between items-center shrink-0">
         <div class="flex items-center gap-2">
             <span class="text-xl md:text-2xl">🥐</span>
             <div>
@@ -47,8 +46,8 @@
             </div>
         </div>
         <div class="flex items-center gap-2 md:gap-4">
-            <button onclick="window.promptGM()" id="gmBtn" class="text-[10px] md:text-xs bg-amber-800 text-amber-200 px-2 py-1 rounded hover:bg-amber-900 transition-colors" title="Claim SuperAdmin">👑 GM</button>
-            <div id="userInfo" class="text-xs font-medium bg-amber-700 px-2 py-1 md:px-3 rounded-full hidden flex-col md:flex-row text-right md:text-left">
+            <button onclick="window.promptGM()" id="gmBtn" class="text-[10px] md:text-xs bg-amber-800 text-amber-200 px-3 py-1.5 rounded hover:bg-amber-900 transition-colors font-bold shadow" title="Claim SuperAdmin">👑 GM</button>
+            <div id="userInfo" class="text-xs font-medium bg-amber-700 px-3 py-1.5 rounded-full hidden flex-col md:flex-row text-right md:text-left shadow">
                 <span id="playerNameDisplay" class="hidden md:inline"></span>
                 <span class="hidden md:inline mx-1">|</span>
                 <span id="playerRoleDisplay"></span>
@@ -56,8 +55,8 @@
         </div>
     </header>
 
-    <!-- Main Content Area -->
-    <main id="app" class="flex-1 overflow-hidden relative w-full h-full p-2 md:p-4 flex flex-col"></main>
+    <!-- Main Content Area: Responsive flow (Not fixed height) -->
+    <main id="app" class="flex-1 w-full max-w-7xl mx-auto p-2 md:p-4 flex flex-col"></main>
 
     <!-- Modal Overlay -->
     <div id="modalOverlay" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center fade-in p-4">
@@ -91,7 +90,7 @@
     let unsubscribeRoom = null;
     let isGM = false;
     let localChatCount = 0; 
-    let currentReplyTo = null;
+    let currentReplyTo = null; 
 
     const ROLES = {
         spv: { id: 'spv', name: 'Supervisor', icon: '👔', desc: 'Pemegang konteks klien.' },
@@ -101,7 +100,6 @@
         baker3: { id: 'baker3', name: 'Baker 3', icon: '🎁', desc: 'Finishing & QC.' }
     };
 
-    // --- GAME OPTIONS ---
     const OPT = {
         mix: ["Pilih...", "5 Menit", "10 Menit", "15 Menit", "20 Menit", "30 Menit"],
         proof: ["Pilih...", "Tanpa Proofing", "Cepat (Suhu Hangat)", "Standar (Suhu Ruang)", "Lambat (Suhu Dingin)", "Double Proofing"],
@@ -111,7 +109,6 @@
         pack: ["Pilih...", "Plastik Ikat Kawat", "Box Kertas Lipat", "Paper Bag Premium", "Plastik Klip", "Mika Plastik"]
     };
 
-    // --- DYNAMIC SCENARIOS (5 Rooms) ---
     const SCENARIOS = {
         'room_1': {
             title: "Kakek Lansia", brief: "Pesan 1 porsi roti manis standar secepatnya.",
@@ -209,7 +206,11 @@
 
     window.promptGM = async () => {
         await initAudio();
-        if (isGM) { isGM = false; currentRoomId = null; currentRole = null; updateUI(); return; }
+        if (isGM) { 
+            isGM = false; currentRoomId = null; currentRole = null; 
+            getEl('userInfo').classList.add('hidden');
+            updateUI(); return; 
+        }
         const pass = prompt("Masukkan Password GM:");
         if (pass === "AKUGANTENG") {
             isGM = true; currentRoomId = null; currentRole = null;
@@ -268,7 +269,31 @@
         });
     }
     window.joinRoom = joinRoom;
-    window.gmLeaveRoom = () => { if(unsubscribeRoom) unsubscribeRoom(); currentRoomId = null; currentRole = null; updateUI(); };
+    
+    window.leaveRoom = async () => {
+        if(!confirm("Yakin ingin keluar dari Room ini? Peran Anda akan kosong dan bisa diisi pemain lain.")) return;
+        if(currentRole && currentRole !== 'gm') {
+            await updateDoc(getRoomRef(currentRoomId), { [`players.${currentRole}`]: null });
+        }
+        if(unsubscribeRoom) unsubscribeRoom();
+        currentRoomId = null; currentRole = null; isGM = false;
+        getEl('userInfo').classList.add('hidden');
+        updateUI();
+    };
+
+    window.resetAllRoomsGM = async () => {
+        if(!confirm("PERINGATAN KERAS! Ini akan mereset KELIMA ROOM kembali ke awal pabrik (kosong). Anda yakin?")) return;
+        for(let i=1; i<=5; i++) {
+            const rRef = getRoomRef('room_'+i);
+            await setDoc(rRef, {
+                id: 'room_'+i, status: 'waiting', 
+                players: { spv: null, leader: null, baker1: null, baker2: null, baker3: null },
+                chat: [],
+                gameState: { spvFirstMessageSent: false, leaderSopSent: false, spvMentioned: false, leaderRecipe: null, baker1Done: false, baker2Done: false, baker3Done: false, resultMsg: "", evalErrors: [] }
+            });
+        }
+        showModal("Reset Sukses", "Seluruh room telah dikosongkan dan direset.");
+    };
 
     window.selectRole = async (roleId) => {
         await initAudio();
@@ -290,7 +315,7 @@
         if (isGM) return { allowed: true, reason: "" };
         const gs = roomData.gameState;
         if (currentRole === 'spv') {
-            if (gs.leaderSopSent && !gs.spvMentioned) return { allowed: false, reason: "Terkunci: Dilarang intervensi dapur kecuali dimention (@) Leader." };
+            if (gs.leaderSopSent && !gs.spvMentioned) return { allowed: false, reason: "Terkunci: Tunggu di-mention (@) / di-reply oleh Leader." };
             return { allowed: true, reason: "" };
         }
         if (currentRole === 'leader') {
@@ -304,11 +329,15 @@
         return { allowed: false, reason: "Peran tidak valid" };
     }
 
-    window.setReply = (id, sender, text) => {
-        currentReplyTo = { id, sender, text: text.length > 30 ? text.substring(0,30) + '...' : text };
+    window.setReply = (id, sender, text, roleIdTarget) => {
+        currentReplyTo = { id, sender, text: text.length > 30 ? text.substring(0,30) + '...' : text, roleId: roleIdTarget };
         updateUI(); setTimeout(() => getEl('chatInput').focus(), 100);
     };
     window.cancelReply = () => { currentReplyTo = null; updateUI(); };
+    window.insertMention = (txt) => {
+        const input = getEl('chatInput');
+        if(input) { input.value += txt + ' '; input.focus(); }
+    };
 
     window.handleChatSubmit = async (e) => {
         e.preventDefault();
@@ -328,6 +357,8 @@
 
         if (currentRole === 'spv' && !gs.spvFirstMessageSent) updates['gameState.spvFirstMessageSent'] = true;
         if (currentRole === 'spv' && gs.spvMentioned) updates['gameState.spvMentioned'] = false; 
+        
+        // Cek jika Leader me-mention SPV
         if (currentRole === 'leader' && gs.leaderSopSent) {
             const mentionsSPV = text.toLowerCase().includes('@spv') || text.toLowerCase().includes('@supervisor') || (currentReplyTo && currentReplyTo.roleId === 'spv');
             if (mentionsSPV) updates['gameState.spvMentioned'] = true;
@@ -372,7 +403,7 @@
         const leaderIng = roomData.gameState.leaderRecipe.ingredients;
         for(let i=0; i<leaderIng.length; i++) {
             let val = parseInt(getEl(`bk1_gram_${i}`).value) || 0;
-            if(val !== leaderIng[i].g) return showModal("Timbangan Gagal!", `Gramasi untuk bahan nomor ${i+1} tidak presisi! Harap cocokkan dengan resep dari Leader di Live Chat.`);
+            if(val !== leaderIng[i].g) return showModal("Timbangan Gagal!", `Gramasi untuk "${leaderIng[i].n}" tidak presisi! Harap cocokkan dengan resep Leader.`);
         }
         await updateDoc(getRoomRef(currentRoomId), { 'gameState.baker1Done': true }); 
         sendSystemChat("⚖️ Baker 1 selesai menakar bahan baku dengan PRESISI TEPAT. Adonan diserahkan ke Baker 2."); 
@@ -382,7 +413,7 @@
         const lb2 = roomData.gameState.leaderRecipe.b2;
         if(getEl('bk2_mix').value !== lb2.mix || getEl('bk2_proof').value !== lb2.proof || 
            getEl('bk2_shape').value !== lb2.shape || getEl('bk2_cook').value !== lb2.cook) {
-            return showModal("Kesalahan Proses!", "Pilihan metode produksi Anda tidak sesuai dengan instruksi Leader. Tanyakan di Live Chat jika ragu!");
+            return showModal("Kesalahan Proses!", "Pilihan metode produksi Anda tidak sesuai dengan SOP Leader. Cek kembali!");
         }
         await updateDoc(getRoomRef(currentRoomId), { 'gameState.baker2Done': true }); 
         sendSystemChat("🥣 Baker 2 selesai mengolah. Roti matang diserahkan ke Baker 3."); 
@@ -390,7 +421,7 @@
     
     window.baker3Submit = async () => {
         if(!getEl('qc_1').checked || !getEl('qc_2').checked || !getEl('qc_3').checked) {
-            return showModal("QC Gagal", "Anda wajib melakukan checklist Quality Control (QC) sebelum produk dikirim!");
+            return showModal("SOP Gagal", "Anda harus melakukan checklist QC (Quality Control) sebelum produk dikirim!");
         }
 
         const lb3 = roomData.gameState.leaderRecipe.b3;
@@ -398,7 +429,6 @@
             return showModal("Kesalahan Finishing!", "Pilihan Topping atau Kemasan tidak sesuai dengan SOP Leader!");
         }
 
-        // EVALUATION LOGIC
         const scenario = getScenario();
         const errors = scenario.eval(roomData.gameState.leaderRecipe);
         const isSuccess = errors.length === 0;
@@ -431,30 +461,33 @@
     }
 
     function renderLobbyHTML() {
-        return `<div class="h-full flex flex-col items-center justify-center fade-in px-4">
-            <div class="glass-panel p-6 md:p-8 rounded-2xl shadow-xl max-w-2xl w-full text-center border-t-8 border-t-amber-500">
-                ${isGM ? '<div class="text-xs bg-slate-800 text-white font-bold py-1 px-3 rounded-full inline-block mb-2">SUPER ADMIN MODE</div>' : ''}
-                <h2 class="text-2xl md:text-3xl font-bold text-amber-700 mb-2">Pilih Ruang Simulasi</h2>
-                <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mt-6">
-                    ${[1,2,3,4,5].map(i => `<button onclick="window.joinRoom('room_${i}', ${isGM})" class="bg-amber-50 hover:bg-amber-500 hover:text-white text-amber-800 font-bold py-4 md:py-6 rounded-xl border shadow-sm flex flex-col items-center"><span class="text-2xl">🚪</span> R-${i}</button>`).join('')}
+        return `<div class="w-full flex flex-col items-center justify-center fade-in px-2 md:px-4 py-8">
+            <div class="glass-panel p-6 md:p-8 rounded-2xl shadow-xl max-w-2xl w-full text-center border-t-8 border-t-amber-500 relative">
+                ${isGM ? '<div class="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] bg-red-600 text-white font-bold py-1 px-3 rounded-full shadow">SUPER ADMIN MODE</div>' : ''}
+                <h2 class="text-2xl md:text-3xl font-bold text-amber-700 mb-2 mt-2">Pilih Ruang Simulasi</h2>
+                <p class="text-sm text-slate-500 mb-6">Pastikan Anda masuk ke ruangan yang sama dengan tim Anda.</p>
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+                    ${[1,2,3,4,5].map(i => `<button onclick="window.joinRoom('room_${i}', ${isGM})" class="bg-amber-50 hover:bg-amber-500 hover:text-white text-amber-800 font-bold py-6 rounded-xl border border-amber-200 shadow-sm flex flex-col items-center transition-colors"><span class="text-3xl mb-1">🚪</span> R-${i}</button>`).join('')}
                 </div>
+                ${isGM ? `<button onclick="window.resetAllRoomsGM()" class="mt-4 w-full bg-red-100 hover:bg-red-600 text-red-700 hover:text-white font-bold py-3 rounded-xl border border-red-300 transition-colors">🔥 Reset Seluruh 5 Room ke Awal Pabrik</button>` : ''}
             </div>
         </div>`;
     }
 
     function renderRoleSelectionHTML() {
         let isSpvTaken = roomData.players.spv, isLeaderTaken = roomData.players.leader;
-        return `<div class="h-full flex flex-col items-center justify-start md:justify-center fade-in overflow-y-auto pt-4">
+        return `<div class="w-full flex flex-col items-center fade-in py-6">
             <div class="glass-panel p-4 md:p-6 rounded-2xl shadow-xl max-w-4xl w-full">
                 <div class="flex justify-between items-center mb-4 border-b pb-3">
                     <h2 class="text-xl font-bold text-slate-800">Ruang: ${currentRoomId.replace('_', ' ').toUpperCase()}</h2>
+                    <button onclick="window.leaveRoom()" class="text-[10px] md:text-xs bg-slate-200 hover:bg-red-500 hover:text-white text-slate-700 px-3 py-1.5 rounded-lg transition-colors font-bold">⬅ Keluar Room</button>
                 </div>
                 <h3 class="text-lg font-semibold mb-3 text-center">Pilih Peran Anda</h3>
                 <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
                     ${Object.values(ROLES).map(role => {
                         const takenByMe = roomData.players[role.id] === currentUser.uid;
                         const isTaken = roomData.players[role.id];
-                        const btnClass = takenByMe ? 'bg-amber-500 text-white' : isTaken ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white hover:border-amber-400 cursor-pointer';
+                        const btnClass = takenByMe ? 'bg-amber-500 text-white' : isTaken ? 'bg-slate-100 text-slate-400 cursor-not-allowed border-transparent' : 'bg-white hover:border-amber-400 cursor-pointer border-slate-200';
                         return `<div onclick="${isTaken && !takenByMe ? '' : `window.selectRole('${role.id}')`}" class="border-2 rounded-xl p-3 flex flex-col items-center text-center transition-all ${btnClass}">
                             <span class="text-3xl mb-1">${role.icon}</span><h4 class="font-bold text-sm mb-1">${role.name}</h4><p class="text-[10px] hidden md:block opacity-80">${role.desc}</p>
                             ${isTaken ? `<span class="mt-1 text-[9px] bg-black/10 px-2 py-1 rounded-full">${takenByMe ? 'Anda' : 'Terisi'}</span>` : ''}
@@ -472,50 +505,70 @@
 
     function renderGameAreaHTML() {
         const access = checkChatAccess();
+        let mentionButtons = `<div class="flex gap-1 p-1 bg-slate-100 border-t overflow-x-auto whitespace-nowrap text-[10px] font-bold text-slate-600">
+            <span class="my-auto mr-1">Quick Mention:</span>
+            <button type="button" onclick="window.insertMention('@SPV')" class="bg-white border rounded px-2 py-0.5 hover:bg-amber-50">@SPV</button>
+            <button type="button" onclick="window.insertMention('@Leader')" class="bg-white border rounded px-2 py-0.5 hover:bg-amber-50">@Leader</button>
+            <button type="button" onclick="window.insertMention('@Baker 1')" class="bg-white border rounded px-2 py-0.5 hover:bg-amber-50">@Baker1</button>
+            <button type="button" onclick="window.insertMention('@Baker 2')" class="bg-white border rounded px-2 py-0.5 hover:bg-amber-50">@Baker2</button>
+            <button type="button" onclick="window.insertMention('@Baker 3')" class="bg-white border rounded px-2 py-0.5 hover:bg-amber-50">@Baker3</button>
+        </div>`;
+
         let chatInputSection = `
+            ${mentionButtons}
             ${currentReplyTo ? `<div class="bg-amber-50 text-xs p-2 flex justify-between items-center border-t">
-                <span class="text-slate-600">Membalas <strong>${currentReplyTo.sender}</strong>: <span class="italic text-slate-500">"${currentReplyTo.text}"</span></span>
+                <span class="text-slate-600 truncate mr-2">Membalas <strong>${currentReplyTo.sender}</strong>: <span class="italic">"${currentReplyTo.text}"</span></span>
                 <button type="button" onclick="window.cancelReply()" class="text-red-500 font-bold hover:text-red-700">✕</button>
             </div>` : ''}
             <form onsubmit="window.handleChatSubmit(event)" class="p-2 md:p-3 bg-slate-50 border-t flex gap-2">
-                <input type="text" id="chatInput" placeholder="${access.allowed ? 'Ketik pesan... (Gunakan @ untuk mention)' : access.reason}" class="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:border-amber-400 text-sm ${!access.allowed ? 'bg-slate-200 cursor-not-allowed' : ''}" autocomplete="off" ${!access.allowed ? 'disabled' : ''}>
+                <input type="text" id="chatInput" placeholder="${access.allowed ? 'Ketik pesan...' : access.reason}" class="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:border-amber-400 text-sm ${!access.allowed ? 'bg-slate-200 cursor-not-allowed' : ''}" autocomplete="off" ${!access.allowed ? 'disabled' : ''}>
                 <button type="submit" class="${access.allowed ? 'bg-amber-600 hover:bg-amber-700' : 'bg-slate-400 cursor-not-allowed'} text-white px-4 py-2 rounded-lg font-bold text-sm shrink-0" ${!access.allowed ? 'disabled' : ''}>Kirim</button>
             </form>`;
 
         if (isGM) {
-            return `<div class="h-full flex flex-col md:flex-row gap-2 md:gap-4 fade-in">
-                <div class="w-full md:w-1/3 flex flex-col bg-slate-900 rounded-xl shadow-md border-2 border-slate-800 h-[45%] md:h-full shrink-0">
-                    <div class="bg-slate-800 text-white p-2 md:p-3 border-b font-bold flex justify-between items-center text-sm">
-                        <span>👑 GM Monitor</span><button onclick="window.gmLeaveRoom()" class="text-[10px] bg-red-500 hover:bg-red-600 px-2 py-1 rounded">⬅ Kembali</button>
+            return `<div class="flex flex-col lg:flex-row gap-4 w-full fade-in">
+                <div class="w-full lg:w-1/3 flex flex-col glass-panel rounded-xl shadow-md border-2 border-slate-800 h-[500px] lg:h-[700px] shrink-0">
+                    <div class="bg-slate-800 text-white p-3 border-b font-bold flex justify-between items-center text-sm">
+                        <span>👑 GM Monitor</span><button onclick="window.leaveRoom()" class="text-[10px] bg-red-500 hover:bg-red-600 px-2 py-1 rounded">⬅ Keluar Room</button>
                     </div>
                     <div id="chatHistoryBox" class="flex-1 p-3 overflow-y-auto chat-container bg-slate-50 flex flex-col gap-2">${renderChatMessages()}</div>
                     ${chatInputSection}
                 </div>
-                <div class="w-full md:w-2/3 flex-1 overflow-y-auto bg-white p-4 rounded-xl shadow-sm border border-slate-200 text-sm">
-                    <h2 class="text-lg font-bold border-b pb-2 mb-2">Status Room: ${currentRoomId}</h2>
-                    <ul class="space-y-1">
-                        <li>Leader SOP Sent: ${roomData.gameState.leaderSopSent ? '✅' : '❌'}</li>
-                        <li>Baker 1 Done: ${roomData.gameState.baker1Done ? '✅' : '❌'}</li>
-                        <li>Baker 2 Done: ${roomData.gameState.baker2Done ? '✅' : '❌'}</li>
-                        <li>Baker 3 Done: ${roomData.gameState.baker3Done ? '✅' : '❌'}</li>
-                    </ul>
-                    <div class="mt-4 p-3 bg-red-50 border border-red-200 rounded">
-                        <strong>Rahasia Klien:</strong> ${getScenario().secretNeed}
+                <div class="w-full lg:w-2/3 flex flex-col gap-4">
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 text-sm">
+                        <h2 class="text-xl font-bold border-b pb-2 mb-4">Status Dashboard Room: ${currentRoomId}</h2>
+                        <ul class="space-y-2 mb-4 font-semibold text-slate-700">
+                            <li class="flex justify-between items-center p-2 bg-slate-50 rounded"><span>SOP dari Leader:</span> <span>${roomData.gameState.leaderSopSent ? '✅ Terkirim' : '❌ Belum'}</span></li>
+                            <li class="flex justify-between items-center p-2 bg-slate-50 rounded"><span>Status SPV:</span> <span>${roomData.gameState.spvMentioned ? '✅ Bisa Intervensi (Mentioned)' : (roomData.gameState.leaderSopSent ? '🔒 Terkunci' : '✅ Bebas')}</span></li>
+                            <li class="flex justify-between items-center p-2 bg-slate-50 rounded"><span>Baker 1 (Prep):</span> <span>${roomData.gameState.baker1Done ? '✅ Selesai' : '⏳ Proses'}</span></li>
+                            <li class="flex justify-between items-center p-2 bg-slate-50 rounded"><span>Baker 2 (Cook):</span> <span>${roomData.gameState.baker2Done ? '✅ Selesai' : '⏳ Proses'}</span></li>
+                            <li class="flex justify-between items-center p-2 bg-slate-50 rounded"><span>Baker 3 (Finish):</span> <span>${roomData.gameState.baker3Done ? '✅ Selesai' : '⏳ Proses'}</span></li>
+                        </ul>
+                        <div class="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                            <strong class="text-red-800 block mb-1">Target Rahasia Klien:</strong>
+                            <p class="text-red-700">${getScenario().secretNeed}</p>
+                        </div>
                     </div>
                 </div>
             </div>`;
         }
 
-        return `<div class="h-full flex flex-col md:flex-row gap-2 md:gap-4 fade-in">
-            <div class="w-full md:w-1/3 flex flex-col glass-panel rounded-xl md:rounded-2xl shadow-sm border border-slate-200 h-[45%] md:h-full shrink-0">
-                <div class="bg-slate-100 p-2 md:p-3 border-b font-bold flex justify-between items-center text-sm md:text-base">
-                    <span>💬 Live Chat Tim</span>
-                    ${!access.allowed ? `<span class="text-[10px] bg-red-100 text-red-700 px-2 py-1 rounded font-bold border border-red-200">TERKUNCI 🔒</span>` : `<span class="text-[10px] bg-green-100 text-green-700 px-2 py-1 rounded font-bold border border-green-200">TERBUKA 🟢</span>`}
+        return `<div class="flex flex-col lg:flex-row gap-4 w-full fade-in">
+            <!-- Chat Panel: Fixed height to prevent infinite scroll on mobile -->
+            <div class="w-full lg:w-1/3 flex flex-col glass-panel rounded-xl shadow-sm border border-slate-200 h-[450px] lg:h-[700px] shrink-0">
+                <div class="bg-slate-100 p-3 border-b font-bold flex justify-between items-center text-sm">
+                    <span class="flex items-center gap-2">💬 Live Chat ${!access.allowed ? `<span class="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded border border-red-200">TERKUNCI</span>` : ''}</span>
+                    <button onclick="window.leaveRoom()" class="text-[10px] text-slate-500 hover:text-red-500 font-semibold underline">Keluar Room</button>
                 </div>
-                <div id="chatHistoryBox" class="flex-1 p-3 overflow-y-auto chat-container bg-white flex flex-col gap-2">${renderChatMessages()}</div>
+                <div id="chatHistoryBox" class="flex-1 p-3 overflow-y-auto chat-container bg-white flex flex-col gap-2 relative">
+                    ${!access.allowed ? `<div class="sticky top-0 w-full bg-red-500 text-white text-[10px] text-center py-1 rounded shadow-md font-bold z-10 opacity-90">${access.reason}</div>` : ''}
+                    ${renderChatMessages()}
+                </div>
                 ${chatInputSection}
             </div>
-            <div class="w-full md:w-2/3 flex-1 flex flex-col overflow-y-auto chat-container pb-6 md:pb-0">
+            
+            <!-- Action Panel: Natural flow -->
+            <div class="w-full lg:w-2/3 flex flex-col gap-4">
                 ${renderRoleSpecificPanel()}
             </div>
         </div>`;
@@ -525,22 +578,24 @@
         if (!roomData.chat || roomData.chat.length === 0) return `<div class="text-center text-slate-400 text-xs my-auto">Ruang obrolan kosong.</div>`;
         return roomData.chat.map(msg => {
             const isMe = msg.roleId === currentRole; const isSys = msg.roleId === 'system'; const isGM = msg.roleId === 'gm';
-            if (isSys) return `<div class="text-center text-[10px] font-bold text-amber-800 bg-amber-100 rounded-lg py-1 px-2 mx-auto my-1 border border-amber-200 w-[95%]">${msg.text}</div>`;
-            let replyHtml = msg.replyTo ? `<div class="reply-box text-slate-500 mb-1"><strong>${msg.replyTo.sender}</strong>: ${msg.replyTo.text}</div>` : '';
+            if (isSys) return `<div class="text-center text-[10px] font-bold text-amber-800 bg-amber-100 rounded-lg py-1 px-2 mx-auto my-1 border border-amber-200 w-[95%] shadow-sm">${msg.text}</div>`;
+            
+            let replyHtml = msg.replyTo ? `<div class="reply-box text-slate-600 border-l-[3px] ${isMe ? 'border-amber-400 bg-amber-50' : 'border-slate-400 bg-slate-200'}"><strong>${msg.replyTo.sender}</strong>: <br><span class="opacity-80">${msg.replyTo.text}</span></div>` : '';
             const txt = formatText(msg.text);
+            
             if (isGM) {
-                return `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[85%] ${isMe ? 'ml-auto' : 'mr-auto'} my-1 group">
-                    <span class="text-[9px] text-slate-400 mb-1 mx-1 font-bold">👑 ${msg.sender}</span>
-                    <div class="p-2 rounded-2xl text-xs shadow-md bg-slate-800 text-white relative">
+                return `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[90%] ${isMe ? 'ml-auto' : 'mr-auto'} my-2 group">
+                    <span class="text-[9px] text-slate-400 mb-0.5 mx-1 font-bold">👑 ${msg.sender}</span>
+                    <div class="p-3 rounded-2xl text-xs md:text-sm shadow-md bg-slate-900 text-white relative border border-slate-700">
                         ${replyHtml}${txt}
-                        ${!isMe ? `<button onclick="window.setReply('${msg.id}', '${msg.sender}', '${msg.text.replace(/'/g, "\\'")}')" class="absolute -right-6 top-2 opacity-0 group-hover:opacity-100 text-slate-400">↩</button>` : ''}
+                        ${!isMe ? `<button onclick="window.setReply('${msg.id}', '${msg.sender}', '${msg.text.replace(/'/g, "\\'")}', '${msg.roleId}')" class="absolute -right-7 top-2 opacity-0 group-hover:opacity-100 text-slate-400 hover:text-amber-500 bg-white rounded-full p-1 shadow">↩</button>` : ''}
                     </div></div>`;
             }
-            return `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[85%] ${isMe ? 'ml-auto' : 'mr-auto'} my-1 group">
-                <span class="text-[9px] text-slate-400 mb-1 mx-1">${msg.sender}</span>
-                <div class="p-2 rounded-2xl text-xs shadow-sm ${isMe ? 'bg-amber-100 text-amber-900 rounded-tr-none' : 'bg-slate-100 text-slate-800 rounded-tl-none'} relative">
+            return `<div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[85%] ${isMe ? 'ml-auto' : 'mr-auto'} my-1.5 group">
+                <span class="text-[9px] text-slate-400 mb-0.5 mx-1">${msg.sender}</span>
+                <div class="p-2.5 rounded-2xl text-xs shadow-sm ${isMe ? 'bg-amber-100 text-amber-900 rounded-tr-none' : 'bg-slate-100 text-slate-800 rounded-tl-none'} relative border ${isMe ? 'border-amber-200' : 'border-slate-200'}">
                     ${replyHtml}${txt}
-                    ${!isMe ? `<button onclick="window.setReply('${msg.id}', '${msg.sender}', '${msg.text.replace(/'/g, "\\'")}')" class="absolute ${isMe ? '-left-6' : '-right-6'} top-2 opacity-0 group-hover:opacity-100 text-slate-400">↩</button>` : ''}
+                    ${!isMe ? `<button onclick="window.setReply('${msg.id}', '${msg.sender}', '${msg.text.replace(/'/g, "\\'")}', '${msg.roleId}')" class="absolute ${isMe ? '-left-7' : '-right-7'} top-2 opacity-0 group-hover:opacity-100 text-slate-400 hover:text-amber-500 bg-white rounded-full p-1 shadow transition-opacity">↩</button>` : ''}
                 </div></div>`;
         }).join('');
     }
@@ -559,19 +614,19 @@
         const scenario = getScenario();
         return `<div class="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-200">
             <h2 class="text-lg font-bold text-slate-800 mb-3">👔 Instruksi Supervisor</h2>
-            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3 rounded-r text-sm">
-                <h3 class="font-bold text-blue-800 mb-1">Konteks Awal:</h3><p>${scenario.brief}</p>
+            <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-4 rounded-r shadow-sm">
+                <h3 class="font-bold text-blue-800 mb-1">Konteks Awal:</h3><p class="text-sm font-medium text-blue-900">${scenario.brief}</p>
             </div>
-            <div class="bg-red-50 border border-red-200 p-3 rounded-xl mb-3 relative shadow-inner">
-                <div class="absolute top-0 right-0 bg-red-600 text-white text-[9px] font-bold px-2 py-1 rounded-bl-lg">RAHASIA</div>
-                <h3 class="font-bold text-red-800 mb-1 text-sm">🕵️ Profil Asli Klien</h3>
-                <p class="text-xs font-semibold bg-white p-2 rounded border border-red-100 mt-2">${scenario.secretNeed}</p>
+            <div class="bg-red-50 border border-red-200 p-4 rounded-xl mb-4 relative shadow-inner">
+                <div class="absolute top-0 right-0 bg-red-600 text-white text-[9px] font-bold px-2 py-1 rounded-bl-lg tracking-wider">RAHASIA</div>
+                <h3 class="font-bold text-red-800 mb-2 text-sm">🕵️ Profil Asli Klien</h3>
+                <p class="text-xs font-semibold bg-white p-3 rounded border border-red-100 text-slate-700 leading-relaxed">${scenario.secretNeed}</p>
             </div>
             <div class="mb-2">
-                <h3 class="font-bold text-slate-700 mb-1 text-xs">Instruksikan 5 Bahan Baku Dasar ini ke Leader via Live Chat:</h3>
-                <p class="text-[10px] text-slate-500 mb-2">Tugas Anda HANYA menjabarkan nama-nama bahan baku standar ini. Biarkan Leader yang berpikir menentukan takaran final/penggantinya berdasarkan profil klien.</p>
-                <div class="space-y-1">
-                    ${scenario.baseIngredients.map(i => `<div class="bg-slate-100 px-3 py-1.5 rounded flex justify-between text-xs border font-medium"><span>${i.n}</span><span>${i.g} g</span></div>`).join('')}
+                <h3 class="font-bold text-slate-700 mb-2 text-sm">Bahan Baku Dasar (Beritahukan ke Leader):</h3>
+                <p class="text-xs text-slate-500 mb-3 bg-slate-50 p-2 rounded border">Tugas Anda menjabarkan nama-nama bahan baku standar ini di Chat. Biarkan Leader memutuskan memodifikasi/mengganti resepnya berdasarkan profil klien yang ia gali dari Anda.</p>
+                <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    ${scenario.baseIngredients.map(i => `<div class="bg-slate-100 px-3 py-2 rounded flex justify-between text-xs border font-bold text-slate-600 shadow-sm"><span>${i.n}</span><span class="text-amber-600">${i.g} g</span></div>`).join('')}
                 </div>
             </div>
         </div>`;
@@ -583,39 +638,41 @@
         
         return `<div class="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-200">
             <h2 class="text-lg font-bold text-amber-600 mb-2">📋 Penentuan Resep & SOP</h2>
-            <p class="text-[10px] md:text-xs text-slate-600 mb-4 bg-amber-50 p-2 rounded border border-amber-200">Berdasarkan chat dengan SPV, tentukan bahan pengganti (jika perlu) dan metode produksi yang tepat untuk Baker. Pastikan Anda beritahukan pilihan Anda di Live Chat agar Baker bisa menyamakan pilihan mereka dengan SOP ini.</p>
-            <div class="space-y-4">
+            <p class="text-xs text-slate-600 mb-5 bg-amber-50 p-3 rounded-lg border border-amber-200 shadow-sm">Berdasarkan chat dengan SPV, tentukan bahan pengganti (jika perlu) dan metode produksi yang tepat untuk Baker.</p>
+            <div class="space-y-6">
                 
-                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    <h3 class="text-xs font-bold text-slate-800 mb-2 border-b pb-1">1. Takaran Baker 1 (Sesuaikan Nama Bahan & Gram)</h3>
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <h3 class="text-sm font-bold text-slate-800 mb-3 border-b pb-2">1. Takaran Baker 1 (Sesuaikan Nama Bahan & Gram)</h3>
+                    <div class="space-y-2">
                     ${scenario.baseIngredients.map((i, idx) => `
-                        <div class="flex gap-2 mb-2">
-                            <input type="text" id="ldr_ing_name_${idx}" value="${i.n}" class="flex-1 px-2 py-1 text-xs border rounded outline-none focus:border-amber-500 font-medium text-slate-700">
-                            <input type="number" id="ldr_ing_gram_${idx}" value="${i.g}" class="w-16 px-2 py-1 text-xs border rounded outline-none focus:border-amber-500 text-center font-bold">
-                            <span class="text-xs py-1 text-slate-400">g</span>
+                        <div class="flex items-center gap-2 bg-white p-2 rounded border focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-400 transition-all">
+                            <input type="text" id="ldr_ing_name_${idx}" value="${i.n}" class="flex-1 px-2 py-1 text-sm outline-none font-medium text-slate-700 w-full">
+                            <input type="number" id="ldr_ing_gram_${idx}" value="${i.g}" class="w-20 px-2 py-1 text-sm outline-none text-right font-bold bg-slate-50 rounded">
+                            <span class="text-xs font-bold text-slate-400">g</span>
                         </div>
                     `).join('')}
-                </div>
-
-                <div class="bg-indigo-50 p-3 rounded-xl border border-indigo-200">
-                    <h3 class="text-xs font-bold text-indigo-900 mb-2 border-b border-indigo-200 pb-1">2. Alur Produksi Baker 2</h3>
-                    <div class="grid grid-cols-2 gap-2 text-xs">
-                        <div><label class="block text-[10px] text-slate-500 mb-0.5 font-bold">Waktu Mixing</label><select id="ldr_b2_mix" class="w-full p-1 border rounded">${generateOptions(OPT.mix)}</select></div>
-                        <div><label class="block text-[10px] text-slate-500 mb-0.5 font-bold">Metode Proofing</label><select id="ldr_b2_proof" class="w-full p-1 border rounded">${generateOptions(OPT.proof)}</select></div>
-                        <div><label class="block text-[10px] text-slate-500 mb-0.5 font-bold">Bentuk Adonan</label><select id="ldr_b2_shape" class="w-full p-1 border rounded">${generateOptions(OPT.shape)}</select></div>
-                        <div><label class="block text-[10px] text-slate-500 mb-0.5 font-bold">Cara Masak</label><select id="ldr_b2_cook" class="w-full p-1 border rounded">${generateOptions(OPT.cook)}</select></div>
                     </div>
                 </div>
 
-                <div class="bg-green-50 p-3 rounded-xl border border-green-200">
-                    <h3 class="text-xs font-bold text-green-900 mb-2 border-b border-green-200 pb-1">3. Finishing Baker 3</h3>
-                    <div class="grid grid-cols-2 gap-2 text-xs">
-                        <div><label class="block text-[10px] text-slate-500 mb-0.5 font-bold">Pilihan Topping</label><select id="ldr_b3_topping" class="w-full p-1 border rounded">${generateOptions(OPT.topping)}</select></div>
-                        <div><label class="block text-[10px] text-slate-500 mb-0.5 font-bold">Pilihan Kemasan</label><select id="ldr_b3_pack" class="w-full p-1 border rounded">${generateOptions(OPT.pack)}</select></div>
+                <div class="bg-indigo-50 p-4 rounded-xl border border-indigo-200 shadow-sm">
+                    <h3 class="text-sm font-bold text-indigo-900 mb-3 border-b border-indigo-200 pb-2">2. Alur Produksi Baker 2</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Waktu Mixing</label><select id="ldr_b2_mix" class="w-full p-2 border rounded-lg outline-none focus:ring-1 focus:ring-indigo-400">${generateOptions(OPT.mix)}</select></div>
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Metode Proofing</label><select id="ldr_b2_proof" class="w-full p-2 border rounded-lg outline-none focus:ring-1 focus:ring-indigo-400">${generateOptions(OPT.proof)}</select></div>
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Bentuk Adonan</label><select id="ldr_b2_shape" class="w-full p-2 border rounded-lg outline-none focus:ring-1 focus:ring-indigo-400">${generateOptions(OPT.shape)}</select></div>
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Cara Masak</label><select id="ldr_b2_cook" class="w-full p-2 border rounded-lg outline-none focus:ring-1 focus:ring-indigo-400">${generateOptions(OPT.cook)}</select></div>
                     </div>
                 </div>
 
-                <button onclick="window.leaderSubmit()" class="w-full bg-slate-800 text-white font-bold py-3 rounded-xl text-sm shadow-md transition hover:-translate-y-1">Kunci Resep & Kirim ke Dapur</button>
+                <div class="bg-green-50 p-4 rounded-xl border border-green-200 shadow-sm">
+                    <h3 class="text-sm font-bold text-green-900 mb-3 border-b border-green-200 pb-2">3. Finishing Baker 3</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Pilihan Topping</label><select id="ldr_b3_topping" class="w-full p-2 border rounded-lg outline-none focus:ring-1 focus:ring-green-400">${generateOptions(OPT.topping)}</select></div>
+                        <div><label class="block text-xs font-bold text-slate-600 mb-1">Pilihan Kemasan</label><select id="ldr_b3_pack" class="w-full p-2 border rounded-lg outline-none focus:ring-1 focus:ring-green-400">${generateOptions(OPT.pack)}</select></div>
+                    </div>
+                </div>
+
+                <button onclick="window.leaderSubmit()" class="w-full bg-slate-800 hover:bg-black text-white font-bold py-4 rounded-xl text-base shadow-lg transition hover:-translate-y-1">Kunci Resep & Kirim ke Dapur Produksi</button>
             </div>
         </div>`;
     }
@@ -626,17 +683,18 @@
         const recipe = roomData.gameState.leaderRecipe.ingredients;
 
         return `<div class="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-200">
-            <h2 class="text-lg font-bold text-slate-800 mb-2">⚖️ Baker 1: Mini-Quiz Penimbangan</h2>
-            <p class="text-[10px] mb-4 text-slate-500 bg-slate-50 p-2 border rounded">Tugas: Baca chat Leader dan masukkan angka gramasi dengan SANGAT PRESISI sesuai instruksinya.</p>
-            <div class="space-y-3 mb-6">
+            <h2 class="text-xl font-bold text-slate-800 mb-2">⚖️ Baker 1: Mini-Quiz Penimbangan</h2>
+            <p class="text-xs mb-6 text-slate-600 bg-blue-50 p-3 border border-blue-200 rounded-lg">Tugas: Baca chat Leader dan masukkan angka gramasi dengan SANGAT PRESISI sesuai instruksinya.</p>
+            <div class="space-y-4 mb-8">
                 ${recipe.map((i, idx) => `
-                    <div class="flex items-center gap-3 bg-slate-50 p-2 rounded border text-sm">
-                        <span class="flex-1 font-semibold text-slate-700">${i.n}</span>
-                        <input type="number" id="bk1_gram_${idx}" placeholder="? g" class="w-20 p-1.5 border rounded outline-none text-center focus:border-blue-400 font-bold text-blue-700">
+                    <div class="flex items-center gap-4 bg-slate-50 p-3 rounded-xl border text-base shadow-sm focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400 transition-all">
+                        <span class="flex-1 font-bold text-slate-700">${i.n}</span>
+                        <input type="number" id="bk1_gram_${idx}" placeholder="0" class="w-24 p-2 border rounded-lg outline-none text-center font-black text-blue-700 bg-white shadow-inner">
+                        <span class="text-sm font-bold text-slate-400">g</span>
                     </div>
                 `).join('')}
             </div>
-            <button onclick="window.baker1Submit()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-xl text-sm shadow-md hover:bg-blue-700 transition">Timbang & Validasi</button>
+            <button onclick="window.baker1Submit()" class="w-full bg-blue-600 text-white font-bold py-4 rounded-xl text-base shadow-lg hover:bg-blue-700 transition hover:-translate-y-1">Timbang & Validasi</button>
         </div>`;
     }
 
@@ -645,28 +703,28 @@
         if (roomData.gameState.baker2Done) return doneScreen('Tugas Proses Selesai.');
 
         return `<div class="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-200">
-            <h2 class="text-lg font-bold text-slate-800 mb-2">🥣 Baker 2: Alur Produksi</h2>
-            <p class="text-[10px] mb-4 text-slate-500 bg-slate-50 p-2 border rounded">Tugas: Pilih metode produksi dari dropdown di bawah agar sama persis dengan yang diperintahkan Leader di chat.</p>
+            <h2 class="text-xl font-bold text-slate-800 mb-2">🥣 Baker 2: Alur Produksi</h2>
+            <p class="text-xs mb-6 text-slate-600 bg-indigo-50 p-3 border border-indigo-200 rounded-lg">Tugas: Pilih metode produksi dari dropdown di bawah agar sama persis dengan yang diperintahkan Leader di chat.</p>
             
-            <div class="bg-white p-3 rounded-xl border border-slate-200 mb-4 space-y-3 text-xs shadow-inner">
-                <div class="flex flex-col gap-1">
-                    <label class="font-bold text-slate-600">1. Waktu Mixing</label>
-                    <select id="bk2_mix" class="w-full p-2 border rounded bg-slate-50 font-medium">${generateOptions(OPT.mix)}</select>
+            <div class="bg-white p-4 md:p-5 rounded-xl border border-slate-200 mb-6 space-y-4 text-sm shadow-inner">
+                <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
+                    <label class="font-bold text-slate-700 md:w-1/3">1. Waktu Mixing</label>
+                    <select id="bk2_mix" class="flex-1 p-3 border rounded-lg bg-slate-50 font-medium outline-none focus:ring-1 focus:ring-indigo-400">${generateOptions(OPT.mix)}</select>
                 </div>
-                <div class="flex flex-col gap-1">
-                    <label class="font-bold text-slate-600">2. Jenis Proofing</label>
-                    <select id="bk2_proof" class="w-full p-2 border rounded bg-slate-50 font-medium">${generateOptions(OPT.proof)}</select>
+                <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
+                    <label class="font-bold text-slate-700 md:w-1/3">2. Jenis Proofing</label>
+                    <select id="bk2_proof" class="flex-1 p-3 border rounded-lg bg-slate-50 font-medium outline-none focus:ring-1 focus:ring-indigo-400">${generateOptions(OPT.proof)}</select>
                 </div>
-                <div class="flex flex-col gap-1">
-                    <label class="font-bold text-slate-600">3. Bentuk Adonan</label>
-                    <select id="bk2_shape" class="w-full p-2 border rounded bg-slate-50 font-medium">${generateOptions(OPT.shape)}</select>
+                <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
+                    <label class="font-bold text-slate-700 md:w-1/3">3. Bentuk Adonan</label>
+                    <select id="bk2_shape" class="flex-1 p-3 border rounded-lg bg-slate-50 font-medium outline-none focus:ring-1 focus:ring-indigo-400">${generateOptions(OPT.shape)}</select>
                 </div>
-                <div class="flex flex-col gap-1">
-                    <label class="font-bold text-slate-600">4. Metode Masak</label>
-                    <select id="bk2_cook" class="w-full p-2 border rounded bg-slate-50 font-medium">${generateOptions(OPT.cook)}</select>
+                <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
+                    <label class="font-bold text-slate-700 md:w-1/3">4. Metode Masak</label>
+                    <select id="bk2_cook" class="flex-1 p-3 border rounded-lg bg-slate-50 font-medium outline-none focus:ring-1 focus:ring-indigo-400">${generateOptions(OPT.cook)}</select>
                 </div>
             </div>
-            <button onclick="window.baker2Submit()" class="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl text-sm shadow-md hover:bg-indigo-700 transition">Proses & Oper B3</button>
+            <button onclick="window.baker2Submit()" class="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl text-base shadow-lg hover:bg-indigo-700 transition hover:-translate-y-1">Proses & Oper B3</button>
         </div>`;
     }
 
@@ -674,46 +732,58 @@
         if (!roomData.gameState.baker2Done) return waitLeaderScreen('Menunggu Roti dari Oven Baker 2...');
 
         return `<div class="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-slate-200">
-            <h2 class="text-lg font-bold text-slate-800 mb-2">🎁 Baker 3: Finishing & QC</h2>
-            <p class="text-[10px] mb-4 text-slate-500 bg-slate-50 p-2 border rounded">Tugas: Hias dan kemas sesuai instruksi chat Leader. Wajib centang seluruh Quality Control sebelum penyerahan.</p>
+            <h2 class="text-xl font-bold text-slate-800 mb-2">🎁 Baker 3: Finishing & QC</h2>
+            <p class="text-xs mb-6 text-slate-600 bg-green-50 p-3 border border-green-200 rounded-lg">Tugas: Hias dan kemas sesuai instruksi chat Leader. Wajib centang seluruh Quality Control sebelum penyerahan.</p>
             
-            <div class="space-y-3 mb-4 bg-white p-3 rounded border shadow-inner text-xs">
-                <div><label class="block font-bold text-slate-700 mb-1">Topping</label><select id="bk3_topping" class="w-full p-2 border rounded bg-slate-50 font-medium">${generateOptions(OPT.topping)}</select></div>
-                <div><label class="block font-bold text-slate-700 mb-1">Kemasan</label><select id="bk3_pack" class="w-full p-2 border rounded bg-slate-50 font-medium">${generateOptions(OPT.pack)}</select></div>
+            <div class="space-y-4 mb-6 bg-slate-50 p-4 rounded-xl border shadow-inner text-sm">
+                <div class="flex flex-col md:flex-row md:items-center gap-2">
+                    <label class="font-bold text-slate-700 md:w-1/3">Topping</label>
+                    <select id="bk3_topping" class="flex-1 p-3 border rounded-lg bg-white font-medium outline-none focus:ring-1 focus:ring-green-400">${generateOptions(OPT.topping)}</select>
+                </div>
+                <div class="flex flex-col md:flex-row md:items-center gap-2">
+                    <label class="font-bold text-slate-700 md:w-1/3">Kemasan</label>
+                    <select id="bk3_pack" class="flex-1 p-3 border rounded-lg bg-white font-medium outline-none focus:ring-1 focus:ring-green-400">${generateOptions(OPT.pack)}</select>
+                </div>
             </div>
 
-            <div class="bg-green-50 p-3 rounded-xl border border-green-200 mb-4">
-                <label class="block font-bold text-green-900 mb-2 text-xs border-b border-green-200 pb-1">Checklist Quality Control (QC)</label>
-                <div class="space-y-2 text-xs text-slate-700">
-                    <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="qc_1" class="w-4 h-4 text-green-600 rounded"><span>Roti telah matang merata.</span></label>
-                    <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="qc_2" class="w-4 h-4 text-green-600 rounded"><span>Bentuk fisik roti konsisten.</span></label>
-                    <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="qc_3" class="w-4 h-4 text-green-600 rounded"><span>Topping dan Kemasan higienis.</span></label>
+            <div class="bg-white p-4 rounded-xl border border-slate-200 mb-8 shadow-sm">
+                <label class="block font-bold text-slate-800 mb-3 text-sm border-b pb-2">Checklist Quality Control (QC)</label>
+                <div class="space-y-3 text-sm text-slate-700 font-medium">
+                    <label class="flex items-center gap-3 cursor-pointer p-2 hover:bg-slate-50 rounded transition-colors"><input type="checkbox" id="qc_1" class="w-5 h-5 text-green-600 rounded focus:ring-0 cursor-pointer"><span>Roti telah matang merata.</span></label>
+                    <label class="flex items-center gap-3 cursor-pointer p-2 hover:bg-slate-50 rounded transition-colors"><input type="checkbox" id="qc_2" class="w-5 h-5 text-green-600 rounded focus:ring-0 cursor-pointer"><span>Bentuk fisik roti konsisten.</span></label>
+                    <label class="flex items-center gap-3 cursor-pointer p-2 hover:bg-slate-50 rounded transition-colors"><input type="checkbox" id="qc_3" class="w-5 h-5 text-green-600 rounded focus:ring-0 cursor-pointer"><span>Topping dan Kemasan higienis.</span></label>
                 </div>
             </div>
             
-            <button onclick="window.baker3Submit()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl shadow-lg text-sm transition hover:-translate-y-1">QC LOLOS & KIRIM KE KLIEN</button>
+            <button onclick="window.baker3Submit()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl shadow-lg text-base transition hover:-translate-y-1">QC LOLOS & KIRIM KE KLIEN</button>
         </div>`;
     }
 
-    function waitLeaderScreen(text) { return `<div class="bg-white p-8 rounded-2xl border flex flex-col items-center justify-center text-center h-full"><div class="text-5xl mb-6 animate-spin duration-1000 opacity-50">⚙️</div><h3 class="text-sm font-bold text-slate-700">${text}</h3></div>`; }
-    function doneScreen(text) { return `<div class="bg-green-50 p-8 rounded-2xl border flex flex-col items-center justify-center text-center h-full"><div class="text-5xl mb-4 text-green-600">✓</div><h3 class="text-sm font-bold text-green-800">${text}</h3></div>`; }
+    function waitLeaderScreen(text) { return `<div class="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center h-full min-h-[300px]"><div class="text-6xl mb-6 animate-spin duration-1000 opacity-30">⚙️</div><h3 class="text-lg font-bold text-slate-600">${text}</h3></div>`; }
+    function doneScreen(text) { return `<div class="bg-green-50 p-8 rounded-2xl border border-green-200 flex flex-col items-center justify-center text-center h-full min-h-[300px]"><div class="text-6xl mb-4 text-green-500 bg-white w-24 h-24 flex items-center justify-center rounded-full shadow-sm">✓</div><h3 class="text-lg font-bold text-green-800">${text}</h3></div>`; }
 
     function renderResultHTML() {
         const gs = roomData.gameState;
         const isSuccess = gs.evalErrors.length === 0;
-        let errHtml = gs.evalErrors.map(e => `<li class="mb-1 text-xs">⚠️ ${e}</li>`).join('');
+        let errHtml = gs.evalErrors.map(e => `<li class="mb-2">⚠️ ${e}</li>`).join('');
 
-        return `<div class="h-full flex flex-col items-center justify-center p-4 fade-in overflow-y-auto">
-            <div class="glass-panel p-6 md:p-8 rounded-2xl shadow-2xl max-w-2xl w-full text-center">
-                <div class="text-6xl mb-4">${isSuccess ? '🎉🏆🎉' : '💥🤦‍♂️💥'}</div>
-                <h2 class="text-2xl font-black mb-4 ${isSuccess ? 'text-green-600' : 'text-red-600'} uppercase">${isSuccess ? 'Misi Berhasil!' : 'Misi Gagal!'}</h2>
+        return `<div class="w-full flex flex-col items-center justify-center p-4 fade-in py-8">
+            <div class="glass-panel p-6 md:p-10 rounded-2xl shadow-2xl max-w-3xl w-full text-center">
+                <div class="text-7xl mb-6 drop-shadow-sm">${isSuccess ? '🎉🏆🎉' : '💥🤦‍♂️💥'}</div>
+                <h2 class="text-3xl font-black mb-6 ${isSuccess ? 'text-green-600' : 'text-red-600'} uppercase tracking-wide">${isSuccess ? 'Misi Berhasil!' : 'Misi Gagal!'}</h2>
                 
-                <div class="bg-white p-4 rounded-xl border text-left mb-6 shadow text-slate-800 text-sm">
-                    <p class="font-bold text-base mb-2 border-b pb-2">Feedback Pelanggan:</p>
-                    <p class="mb-4 font-medium">${gs.resultMsg}</p>
-                    ${!isSuccess ? `<div class="bg-red-50 text-red-800 p-3 rounded-lg border border-red-200"><ul class="list-disc pl-4">${errHtml}</ul></div>` : '<div class="bg-green-50 text-green-800 p-3 rounded border border-green-200 font-medium">Seluruh kebutuhan teknis dan emosional klien terpenuhi dengan sempurna! Tim memiliki <strong>EMPATHY MINDSET</strong> yang sangat baik.</div>'}
+                <div class="bg-white p-6 rounded-xl border text-left mb-8 shadow-sm text-slate-800">
+                    <p class="font-bold text-xl mb-3 border-b pb-3">Feedback Pelanggan:</p>
+                    <p class="mb-5 text-lg leading-relaxed">${gs.resultMsg}</p>
+                    ${!isSuccess ? `<div class="bg-red-50 text-red-800 p-4 rounded-xl border border-red-200"><ul class="list-disc pl-5 font-medium space-y-1">${errHtml}</ul></div>` : '<div class="bg-green-50 text-green-800 p-4 rounded-xl border border-green-200 font-bold text-lg">Seluruh kebutuhan teknis dan emosional klien terpenuhi dengan sempurna! Tim memiliki EMPATHY MINDSET yang sangat baik.</div>'}
                 </div>
-                <p class="text-xs text-slate-500 mt-4">Simulasi selesai. Silakan lakukan evaluasi bersama Game Master.</p>
+                
+                <div class="bg-slate-800 p-6 rounded-xl text-left text-white shadow-inner mb-6">
+                    <h3 class="font-bold text-lg mb-2 text-amber-400">💡 Refleksi Simulasi</h3>
+                    <p class="text-sm text-slate-300 leading-relaxed">Dalam operasional nyata, eksekutor (Baker) sangat fokus pada SOP (timbangan akurat, suhu tepat). Namun, <strong>tanpa Leader dan SPV yang proaktif menggali konteks (Empati Klien)</strong>, produk yang secara teknis "sempurna" bisa berujung pada komplain fatal karena tidak sesuai dengan keadaan sesungguhnya dari pelanggan.</p>
+                </div>
+                
+                <button onclick="window.leaveRoom()" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-3 px-8 rounded-full transition-colors mt-2">Kembali ke Lobby Ruangan</button>
             </div>
         </div>`;
     }
